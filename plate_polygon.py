@@ -7,9 +7,7 @@ import math
 class PlateAssignmentPolygonGenerator:
     """Transformer のユニット選択境界を極座標サンプリングで求めます。
 
-    各原盤の中心から一定角度ごとに外向きへ進み、その位置の光線を天球へ
-    逆投影します。担当ユニットが切り替わる半径を二分探索することで、旧
-    DrawPoly.ipynb の星分布に依存した手作業を自動化します。
+    各原盤の中心から一定角度ごとに外向きへ進み、その位置の光線を天球へ逆投影します。担当ユニットが切り替わる半径を二分探索することで、旧DrawPoly.ipynb の星分布に依存した手作業を自動化します。
     """
 
     def __init__(self, transformer, samples=180, iterations=22):

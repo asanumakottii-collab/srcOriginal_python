@@ -19,9 +19,7 @@
 #
 """hip_main.dat / tyc_main.dat / rc3.dat / IAU88.hlc を読み込むモジュールです。
 
-NOTE: 乱数生成には Python 標準の random モジュールを使用しています。
-java.util.Random とはアルゴリズムが異なるため、同じシード値(0)でも
-生成される乱数列そのものは Java 版と一致しません(統計的性質は同等です)。
+NOTE: 乱数生成には Python 標準の random モジュールを使用しています。java.util.Random とはアルゴリズムが異なるため、同じシード値(0)でも生成される乱数列そのものは Java 版と一致しません(統計的性質は同等です)。
 """
 
 import math
@@ -31,14 +29,10 @@ import random
 from mathvector import MathVector
 from models import SphereConstellation, SpherePosition, SphereStar
 
-# hip_main.dat 等のカタログはこのモジュールと同じフォルダに置く。
-# 実行時のカレントディレクトリに関わらず python フォルダ単体で完結させるため、
-# カレントディレクトリではなくこのファイルの場所を基準に探す。
+# hip_main.dat 等のカタログはこのモジュールと同じフォルダに置く。実行時のカレントディレクトリに関わらず python フォルダ単体で完結させるため、カレントディレクトリではなくこのファイルの場所を基準に探す。
 _DATA_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# OTL_prog の hip_constellation_line_star.csv にだけ含まれ、IAU88.hlc の
-# HIPブロックには無い星。補助CSVを同梱しない配布形態でも旧版と同じ対象を
-# 拡大できるよう、HIP番号だけを保持する。
+# OTL_prog の hip_constellation_line_star.csv にだけ含まれ、IAU88.hlc のHIPブロックには無い星。補助CSVを同梱しない配布形態でも旧版と同じ対象を拡大できるよう、HIP番号だけを保持する。
 _LEGACY_CONSTELLATION_STAR_HIP_NUMBERS = {
     2072, 3760, 3881, 5348, 7083, 8645, 8833, 8837, 10324, 10559, 10826, 11345,
     11783, 12093, 12390, 12484, 13209, 13254, 17448, 17847, 18246, 18505, 18614,
@@ -67,14 +61,13 @@ def _readline(f):
 
 
 class SphereReader:
-    def __init__(self, above_maximum, maximum, extremum, minimum, under_minimum):
+    def __init__(self, above_maximum, maximum, minimum, under_minimum):
         self._in_hip = open(os.path.join(_DATA_DIR, "hip_main.dat"), encoding="ascii")
         self._in_tyc = open(os.path.join(_DATA_DIR, "tyc_main.dat"), encoding="ascii")
         self._in_rc3 = open(os.path.join(_DATA_DIR, "rc3.dat"), encoding="ascii")
         self._in_hlc = open(os.path.join(_DATA_DIR, "IAU88.hlc"), encoding="utf-8")
         self._above_maximum = above_maximum
         self._maximum = maximum
-        self._extremum = extremum
         self._minimum = minimum
         self._under_minimum = under_minimum
         self._random = random.Random(0)
@@ -90,10 +83,7 @@ class SphereReader:
     def constellation_star_hip_numbers():
         """星座線を構成する恒星のHIP番号を返します。
 
-        IAU88.hlc の ``HIP: { ... }`` ブロックを基本データとし、Java版で
-        追加された補助CSVが同じフォルダにあれば、そのHIP番号も併合します。
-        星座ストリームとは別にファイルを開くため、read_constellation() の
-        読み取り位置には影響しません。
+        IAU88.hlc の ``HIP: { ... }`` ブロックを基本データとし、Java版で追加された補助CSVが同じフォルダにあれば、そのHIP番号も併合します。星座ストリームとは別にファイルを開くため、read_constellation() の読み取り位置には影響しません。
         """
         hip_numbers = set(_LEGACY_CONSTELLATION_STAR_HIP_NUMBERS)
         in_hip_block = False
@@ -144,9 +134,6 @@ class SphereReader:
                             or s.vmag > self._minimum - math.log(self._random.random()) / math.log(2.512)):
                         continue
                     s.vmag = self._minimum
-                if s.vmag > self._extremum:
-                    s.vmag -= 2.
-
                 # alpha, degrees (ICRS, Epoch=J1991.25)
                 value = line[51:63]
                 if value == "            ":
@@ -182,9 +169,6 @@ class SphereReader:
                             or s.vmag > self._minimum - math.log(self._random.random()) / math.log(2.512)):
                         continue
                     s.vmag = self._minimum
-                if s.vmag > self._extremum:
-                    s.vmag -= 2.
-
                 # alpha, degrees (ICRS, Epoch=J1991.25)
                 value = line[51:63]
                 if value == "            ":
@@ -206,8 +190,6 @@ class SphereReader:
                           .plus(self._galaxy_vectors[0].mult_scalar(r * math.cos(theta)))
                           .plus(self._galaxy_vectors[1].mult_scalar(r * math.sin(theta))))
                 s.vmag = self._minimum
-                if s.vmag > self._extremum:
-                    s.vmag -= 2.
                 s.p = SpherePosition.from_vector(vector)
                 return s
 
@@ -283,9 +265,18 @@ class SphereReader:
                     continue
                 pa = float(value)
 
-                self._galaxy_scale = math.exp(math.sqrt(
-                    -2. * math.log(0.5 * math.pi * math.sqrt(2. * math.pi) * d25 * d25 / r25
-                                    * math.pow(2.512, -25 + vtmag) * 36. * 0.25)))
+                galaxy_count = int(math.pow(2.512, self._minimum - vtmag))
+                if galaxy_count <= 0:
+                    continue
+
+                scale_argument = (0.5 * math.pi * math.sqrt(2. * math.pi) * d25 * d25 / r25
+                                  * math.pow(2.512, -25 + vtmag) * 36. * 0.25)
+                # この分布モデルでは scale_argument が (0, 1] の範囲にある必要がある。
+                # RC3 にはこの条件を満たさないレコードがあり、Python では負数の平方根が
+                # ValueError になるため、生成不能な銀河を読み飛ばす。
+                if not 0. < scale_argument <= 1.:
+                    continue
+                self._galaxy_scale = math.exp(math.sqrt(-2. * math.log(scale_argument)))
                 gv = self._galaxy_vectors
                 gv[2] = MathVector.from_mag_lng_lat(1., math.radians(radeg), math.radians(dedeg))
                 gv[0] = MathVector(0, 0, 1.)
@@ -295,7 +286,7 @@ class SphereReader:
                 gv[1] = gv[2].cross(gv[0])
                 gv[0] = gv[0].mult_scalar(math.radians(d25 / 600 / 2))
                 gv[1] = gv[1].mult_scalar(math.radians(d25 / 600 / 2 / r25))
-                self._galaxy_count = int(math.pow(2.512, self._minimum - vtmag))
+                self._galaxy_count = galaxy_count
                 continue
 
             return None
