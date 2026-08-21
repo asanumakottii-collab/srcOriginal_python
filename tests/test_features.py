@@ -2,7 +2,9 @@ import math
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from basic_transformer import BasicTransformer
 from mathvector import MathVector
@@ -83,6 +85,61 @@ class ConstellationStarTests(unittest.TestCase):
 
     def test_legacy_enlarge_property_name_is_supported(self):
         self.assertEqual(1.5, _init_enlarge_rate({"star-EnlargeRate": "1.5"}))
+
+
+class SphereReaderTests(unittest.TestCase):
+    @staticmethod
+    def _rc3_record(btmag, bv, log_d25):
+        record = [" "] * 256
+        record[0:2] = "12"
+        record[2:4] = "00"
+        record[4:8] = "00.0"
+        record[9] = "+"
+        record[10:12] = "20"
+        record[12:14] = "00"
+        record[14:16] = "00"
+        record[151:155] = f"{log_d25:4.2f}"
+        record[157:160] = ".00"
+        record[185:188] = "  0"
+        record[189:194] = f"{btmag:5.2f}"
+        record[252:256] = f"{bv:4.2f}"
+        return "".join(record) + "\n"
+
+    def test_catalog_magnitude_is_preserved_within_limits(self):
+        tycho_record = [" "] * 216
+        tycho_record[41:46] = f"{4.5:5.2f}"
+        tycho_record[51:63] = f"{12.0:12.6f}"
+        tycho_record[64:76] = f"{34.0:12.6f}"
+        streams = [
+            StringIO(),
+            StringIO("".join(tycho_record) + "\n"),
+            StringIO(),
+            StringIO(),
+        ]
+
+        with patch("builtins.open", side_effect=streams):
+            reader = SphereReader(False, 1.5, 7.5, False)
+            star = reader.read_star()
+
+        self.assertEqual(4.5, star.vmag)
+
+    def test_invalid_galaxy_scale_is_skipped(self):
+        invalid_record = self._rc3_record(10.0, 0.5, 3.0)
+        valid_record = self._rc3_record(10.0, 0.5, 1.0)
+        streams = [
+            StringIO(),
+            StringIO(),
+            StringIO(invalid_record + valid_record),
+            StringIO(),
+        ]
+
+        with patch("builtins.open", side_effect=streams):
+            reader = SphereReader(False, 7.5, 10.0, True)
+            star = reader.read_star()
+
+        self.assertIsNotNone(star)
+        self.assertTrue(math.isfinite(star.p.radeg))
+        self.assertTrue(math.isfinite(star.p.dedeg))
 
 
 class AssignmentPolygonTests(unittest.TestCase):

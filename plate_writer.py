@@ -26,8 +26,7 @@ from enum import Enum
 
 DEFAULT_OUTPUT_DIR = "output"
 
-# SVGのpoints属性にはmmなどの単位を付けられないため、絶対長で記述した
-# 円・文字と座標を揃える際にCSS標準の96 dpiへ変換する。
+# SVGのpoints属性にはmmなどの単位を付けられないため、絶対長で記述した円・文字と座標を揃える際にCSS標準の96 dpiへ変換する。
 _CSS_PIXELS_PER_MM = 96. / 25.4
 
 

@@ -334,29 +334,25 @@ def _init_sphere_reader(props):
         above_maximum = input().lower() != "n"
         print("最輝星は何等星ですか。(default=1.5) ")
         maximum = BasicTransformer.parse_double_with_default(input(), 1.5)
-        print("青セロハンを使わない最微星は何等星ですか。(default=3.5) ")
-        extremum = BasicTransformer.parse_double_with_default(input(), 3.5)
-        print("青セロハンを使った最微星は何等星ですか。(default=7.5) ")
+        print("最微星は何等星ですか。(default=7.5) ")
         minimum = BasicTransformer.parse_double_with_default(input(), 7.5)
         print("最微星より暗い星を、最微星で疑似的に表現しますか。(y/N) ")
         under_minimum = input().lower() == "y"
     else:  # non-interactive mode
         above_maximum = BasicTransformer.parse_boolean_with_default(props.get("star.above-maximum", ""), True)
         maximum = BasicTransformer.parse_double_with_default(props.get("star.maximum"), 1.5)
-        extremum = BasicTransformer.parse_double_with_default(props.get("star.extremum"), 3.5)
         minimum = BasicTransformer.parse_double_with_default(props.get("star.minimum"), 7.5)
         under_minimum = BasicTransformer.parse_boolean_with_default(props.get("star.under-minimum"), False)
         excluding_stars = props.get("star.excluding", "").strip()
         print("\t最輝星より明るい星を、最輝星で疑似的に表現" + ("します。" if under_minimum else "しません。"))
         print(f"\t最輝星は {maximum} 等星です。")
-        print(f"\t青セロハンを使わない最微星は {extremum} 等星です。")
-        print(f"\t青セロハンを使った最微星は {minimum} 等星です。")
+        print(f"\t最微星は {minimum} 等星です。")
         print("\t最微星より暗い星を、最微星で疑似的に表現" + ("します。" if under_minimum else "しません。"))
         if excluding_stars == "":
             print("\t除外する星はありません。")
         else:
             print(f"\t除外する星は {excluding_stars} です。")
-    reader = SphereReader(above_maximum, maximum, extremum, minimum, under_minimum)
+    reader = SphereReader(above_maximum, maximum, minimum, under_minimum)
     if excluding_stars is not None:
         for hip_num in excluding_stars.split(" "):
             if hip_num != "":
