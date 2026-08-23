@@ -25,7 +25,7 @@ import sys
 from basic_transformer import BasicTransformer
 from config import load_properties
 from models import PlatePosition
-from plate_writer import DEFAULT_OUTPUT_DIR, PlateWriterPS, PlateWriterSVG, PlateWriterType
+from plate_writer import DEFAULT_OUTPUT_DIR, PlateWriterPDF, PlateWriterSVG, PlateWriterType
 from sphere_reader import SphereReader
 
 
@@ -97,7 +97,7 @@ def _usage():
     print("Usage:")
     print("\tpython galaxy_transformer.py [options]")
     print("Options:")
-    print("\t-PS\t原板データをPostScript形式で出力します。")
+    print("\t-PDF\t原板データを印刷用PDF形式で出力します。")
     print("\t-f [configFile]\tプラネタリウムの設定を configFile から読み込みます。")
     print("\t-h,-help\tこのメッセージを表示します。")
 
@@ -167,8 +167,8 @@ def _init_plate_writer(props, writer_type):
         print("\t原板を" + ("黒色" if invert_color else "白色") + "、星を" + ("白色" if invert_color else "黒色") + "で書き出します。")
     if writer_type == PlateWriterType.SVG:
         return PlateWriterSVG(column, row, 0., False, filename_prefix, invert_color, output_dir)
-    if writer_type == PlateWriterType.POSTSCRIPT:
-        return PlateWriterPS(column, row, 0., False, filename_prefix, invert_color, output_dir)
+    if writer_type == PlateWriterType.PDF:
+        return PlateWriterPDF(column, row, 0., False, filename_prefix, invert_color, output_dir)
     return None
 
 
@@ -179,8 +179,11 @@ def main(argv=None):
     config_file_name = None
     i = 0
     while i < len(argv):
-        if argv[i].lower() == "-ps":
-            writer_type = PlateWriterType.POSTSCRIPT
+        if argv[i].lower() in ("-pdf", "--pdf"):
+            writer_type = PlateWriterType.PDF
+        elif argv[i].lower() == "-ps":
+            print("PostScript出力は廃止されました。-PDFを使用してください。", file=sys.stderr)
+            return 2
         elif argv[i] == "-f":
             if i + 1 >= len(argv):
                 print("入力ファイルが指定されていません。", file=sys.stderr)
@@ -200,13 +203,14 @@ def main(argv=None):
     w = _init_plate_writer(props, writer_type)
     print("ユニットを配置しています。。。")
     t.process_stars(r, w)
-    print("星座を処理しますか。(y/N) ")
-    if input().lower() == "y":
-        t.process_constellations(r, w)
+    if writer_type == PlateWriterType.SVG:
+        print("星座を処理しますか。(y/N) ")
+        if input().lower() == "y":
+            t.process_constellations(r, w)
     print("データを発行しています。")
     w.close()
     print("完了しました。(`･ω･´) ｼｬｷｰﾝ")
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -1,3 +1,4 @@
+import importlib.util
 import math
 import tempfile
 import unittest
@@ -8,12 +9,17 @@ from unittest.mock import patch
 
 from basic_transformer import BasicTransformer
 from mathvector import MathVector
-from models import PlatePosition, SpherePosition, SphereStar
+from galaxy_transformer import _init_plate_writer as _init_galaxy_plate_writer
+from models import PlateConstellation, PlatePosition, PlateStar, SpherePosition, SphereStar
 from plate_polygon import PlateAssignmentPolygonGenerator
-from plate_writer import PlateWriterSVG
+from plate_writer import PlateWriterPDF, PlateWriterSVG, PlateWriterType
 from sphere_reader import SphereReader
-from transformer import Transformer, _init_enlarge_rate
+from transformer import Transformer, _init_enlarge_rate, _init_plate_writer
 from unit_arrangement import CustomUnitArrangement
+
+
+_HAS_REPORTLAB = importlib.util.find_spec("reportlab") is not None
+_HAS_PYPDF = importlib.util.find_spec("pypdf") is not None
 
 
 class _IdentityTransformer(BasicTransformer):
@@ -195,6 +201,91 @@ class AssignmentPolygonTests(unittest.TestCase):
             first_x, first_y = map(float, polygons[0].attrib["points"].split()[0].split(","))
             self.assertAlmostEqual(95.5 * 96 / 25.4, first_x)
             self.assertAlmostEqual(69.25 * 96 / 25.4, first_y)
+
+
+def _plate_star(dir_=0, index=0, xmm=0.0, ymm=0.0, radius=0.5):
+    star = PlateStar()
+    star.p = PlatePosition()
+    star.p.dir = dir_
+    star.p.index = index
+    star.p.xmm = xmm
+    star.p.ymm = ymm
+    star.rmm = radius
+    return star
+
+
+@unittest.skipUnless(_HAS_REPORTLAB, "ReportLab is required for PDF writer tests")
+class PDFWriterTests(unittest.TestCase):
+    def test_pdf_writer_replaces_postscript_writer(self):
+        self.assertEqual({"SVG", "PDF"}, {writer_type.name for writer_type in PlateWriterType})
+
+        with tempfile.TemporaryDirectory() as directory:
+            writer = PlateWriterPDF(1, 1, 37.5, True, "print-", False, directory)
+            writer.write_star(_plate_star())
+            writer.close()
+
+            output = Path(directory, "print-0.pdf")
+            self.assertTrue(output.read_bytes().startswith(b"%PDF-"))
+            self.assertFalse(Path(directory, "print-0.ps").exists())
+
+    def test_pdf_factories_are_used_by_both_transformers(self):
+        with tempfile.TemporaryDirectory() as directory, patch("sys.stdout", new_callable=StringIO):
+            props = {"output.directory": directory}
+            star_writer = _init_plate_writer(props, PlateWriterType.PDF)
+            galaxy_writer = _init_galaxy_plate_writer(props, PlateWriterType.PDF)
+            try:
+                self.assertIsInstance(star_writer, PlateWriterPDF)
+                self.assertIsInstance(galaxy_writer, PlateWriterPDF)
+            finally:
+                star_writer.close()
+                galaxy_writer.close()
+
+    @unittest.skipUnless(_HAS_PYPDF, "pypdf is required for PDF structure tests")
+    def test_pdf_is_print_sized_vector_and_contains_only_plate_numbers(self):
+        from pypdf import PdfReader
+
+        with tempfile.TemporaryDirectory() as directory:
+            writer = PlateWriterPDF(1, 1, 37.5, True, "print-", True, directory)
+            writer.write_star(_plate_star(dir_=0, xmm=-5.0, ymm=3.0))
+            writer.write_star(_plate_star(dir_=1, xmm=4.0, ymm=-2.0))
+
+            constellation = PlateConstellation()
+            constellation.name = "Orion"
+            constellation.p = PlatePosition()
+            constellation.ll = [[PlatePosition(), PlatePosition()]]
+            writer.write_constellation(constellation)
+            writer.close()
+
+            plain_writer = PlateWriterPDF(1, 1, 37.5, True, "plain-", True, directory)
+            plain_writer.write_star(_plate_star(dir_=0, xmm=-5.0, ymm=3.0))
+            plain_writer.write_star(_plate_star(dir_=1, xmm=4.0, ymm=-2.0))
+            plain_writer.close()
+
+            reader = PdfReader(Path(directory, "print-0.pdf"))
+            self.assertEqual(1, len(reader.pages))
+            page = reader.pages[0]
+            point_to_mm = 25.4 / 72
+            self.assertAlmostEqual(191, float(page.mediabox.width) * point_to_mm, places=3)
+            self.assertAlmostEqual(277, float(page.mediabox.height) * point_to_mm, places=3)
+            self.assertEqual(["N0", "S0"], page.extract_text().split())
+            self.assertEqual([], list(page.images))
+            self.assertNotIn(b"l", [operator for _, operator in page.get_contents().operations])
+            self.assertEqual(
+                Path(directory, "plain-0.pdf").read_bytes(),
+                Path(directory, "print-0.pdf").read_bytes(),
+            )
+
+
+class OutputFormatCLITests(unittest.TestCase):
+    def test_deprecated_postscript_option_stops_both_commands(self):
+        from galaxy_transformer import main as galaxy_main
+        from transformer import main as star_main
+
+        for main in (star_main, galaxy_main):
+            with (patch("sys.stdout", new_callable=StringIO),
+                  patch("sys.stderr", new_callable=StringIO) as stderr):
+                self.assertEqual(2, main(["-PS"]))
+                self.assertIn("-PDF", stderr.getvalue())
 
 
 if __name__ == "__main__":

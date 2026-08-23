@@ -17,7 +17,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #
-"""原板データをSVGまたはPostScriptとして書き出すモジュールです。"""
+"""原板データをSVGまたは印刷用PDFとして書き出すモジュールです。"""
 
 import math
 import os
@@ -45,7 +45,7 @@ def resolve_output_path(output_dir, filename):
 
 class PlateWriterType(Enum):
     SVG = "SVG"
-    POSTSCRIPT = "PostScript"
+    PDF = "PDF"
 
 
 class PlateWriter(ABC):
@@ -69,7 +69,7 @@ class PlateWriter(ABC):
 
 
 class _PlateWriterBase(PlateWriter):
-    """PlateWriterPS と PlateWriterSVG に共通するレイアウト計算。"""
+    """PlateWriterPDF と PlateWriterSVG に共通するレイアウト計算。"""
 
     WIDTH = 191.  # 出力用紙の幅
     HEIGHT = 277. / 2.  # 出力用紙の高さ
@@ -109,20 +109,46 @@ class _PlateWriterBase(PlateWriter):
                 pass
 
 
-class PlateWriterPS(_PlateWriterBase):
+class PlateWriterPDF(_PlateWriterBase):
+    """191 x 277 mmの1ページPDFをベクトルで書き出します。
+
+    印刷用PDFに追加する表示は原盤番号（N0/S0など）だけとし、
+    SVGの向きマークや星座名・星座線は含めません。
+    """
+
+    def __init__(self, column, row, r, shape, filename_prefix, invert_color,
+                 output_dir=DEFAULT_OUTPUT_DIR):
+        try:
+            from reportlab.lib.units import mm
+            from reportlab.pdfgen.canvas import Canvas
+        except ImportError as exc:
+            raise RuntimeError(
+                "PDF出力にはReportLabが必要です。"
+                "'pip install -r requirements.txt' を実行してください。"
+            ) from exc
+
+        super().__init__(column, row, r, shape, filename_prefix, invert_color, output_dir)
+        self._mm = mm
+        self._canvas_class = Canvas
+        self._page_size = (self.WIDTH * mm, self.HEIGHT * 2 * mm)
+
+    def _x(self, value):
+        """mm単位のx座標をPDFのpoint単位に変換します。"""
+        return value * self._mm
+
+    def _y(self, value):
+        """y軸下向きのmm座標をPDFのy軸上向き座標に変換します。"""
+        return (self.HEIGHT * 2 - value) * self._mm
+
     def _write_frame(self, index):
         page = index // (self.column * self.row)
         while page >= self.number_of_page:
-            out = open(self._output_path("ps"), "w", encoding="ascii")
-            out.write("%!PS-Adobe-3.0\n")
-            out.write("%%Pages: 1\n")
-            out.write("%%Page: 1page 1\n")
-            out.write("/circ { 0 360 arc } def\n")
-            out.write("/strmiddle { dup stringwidth pop 2 div neg 0 rmoveto } def\n")
-            out.write("/showmiddle { strmiddle show } def\n")
-            out.write("2.834646 -2.834646 scale\n")  # mm単位、y軸は下方向
-            out.write(f"0 {-self.HEIGHT * 2} translate\n")
-            out.write("/Verdana findfont 3 scalefont setfont\n")
+            out = self._canvas_class(
+                self._output_path("pdf"),
+                pagesize=self._page_size,
+                pageCompression=1,
+                invariant=1,
+            )
             self.outs.append(out)
             self.number_of_page += 1
         while index >= self.number_of_plate:
@@ -131,20 +157,27 @@ class PlateWriterPS(_PlateWriterBase):
             for i in range(2):
                 cy = self._get_cy(i, self.number_of_plate)
                 label = ("N" if i == 0 else "S") + str(self.number_of_plate)
-                out.write(f"gsave {cx} {cy - self.r} translate 1 -1 scale 0 0 moveto ({label}) showmiddle grestore\n")
-                out.write("0.1 setlinewidth\n")
+                out.setFillGray(0)
+                out.setFont("Helvetica", self._x(3))
+                out.drawCentredString(self._x(cx), self._y(cy - self.r), label)
+                out.setLineWidth(self._x(0.1))
+                out.setStrokeGray(0)
                 if self.shape:
-                    out.write(f"{cx} {cy} {self.r} circ "
-                              f"{'0 setgray fill 1 setgray' if self.invert_color else 'stroke'}\n")
-                    out.write(f"newpath {cx - self.r * 3. / 4.} {cy - self.r * 3. / 4.} moveto "
-                              f"{cx - self.r} {cy - self.r} lineto stroke\n")
-                    out.write(f"newpath {cx - self.r * 3. / 4.} {cy - self.r} moveto "
-                              f"{cx - self.r} {cy - self.r * 3. / 4.} lineto stroke\n")
+                    out.setFillGray(0)
+                    out.circle(
+                        self._x(cx), self._y(cy), self._x(self.r),
+                        stroke=0 if self.invert_color else 1,
+                        fill=1 if self.invert_color else 0,
+                    )
                 else:
                     x, y = cx - self.r, cy - self.r
                     w, h = self.r * 2, self.r * 2
-                    out.write(f"newpath {x} {y} moveto {w} 0 rlineto 0 {h} rlineto {-w} 0 rlineto closepath "
-                              f"{'0 setgray fill' if self.invert_color else 'stroke'}\n")
+                    out.setFillGray(0)
+                    out.rect(
+                        self._x(x), self._y(y + h), self._x(w), self._x(h),
+                        stroke=0 if self.invert_color else 1,
+                        fill=1 if self.invert_color else 0,
+                    )
             self.number_of_plate += 1
 
     def write_star(self, s):
@@ -152,53 +185,32 @@ class PlateWriterPS(_PlateWriterBase):
             raise IOError("writer is closed")
         self._write_frame(s.p.index)
         if (abs(s.p.xmm) > self.r or abs(s.p.ymm) > self.r
-                or math.isnan(s.p.xmm) or math.isnan(s.p.ymm)):
+                or not math.isfinite(s.p.xmm) or not math.isfinite(s.p.ymm)
+                or not math.isfinite(s.rmm) or s.rmm <= 0):
             return
         out = self.outs[s.p.index // (self.column * self.row)]
         cx = self._get_cx(s.p.index)
         cy = self._get_cy(s.p.dir, s.p.index)
-        if self.invert_color:
-            out.write("1 setgray ")  # white
-        out.write(f"{cx + s.p.xmm} {cy + s.p.ymm} {s.rmm} circ fill\n")
+        out.setFillGray(1 if self.invert_color else 0)
+        out.circle(
+            self._x(cx + s.p.xmm),
+            self._y(cy + s.p.ymm),
+            self._x(s.rmm),
+            stroke=0,
+            fill=1,
+        )
 
     def write_constellation(self, c):
         if self.outs is None:
             raise IOError("writer is closed")
-        if c.name is not None and c.p is not None:
-            self._write_frame(c.p.index)
-            out = self.outs[c.p.index // (self.column * self.row)]
-            cx = self._get_cx(c.p.index)
-            cy = self._get_cy(c.p.dir, c.p.index)
-            if abs(c.p.xmm) <= self.r and abs(c.p.ymm) <= self.r:
-                out.write(f"gsave {cx + c.p.xmm} {cy + c.p.ymm} translate 1 -1 scale 0 0 moveto "
-                          f"({c.name}) showmiddle grestore\n")
-        if c.ll is not None:
-            for line in c.ll:
-                self._write_frame(line[0].index)
-                out = self.outs[line[0].index // (self.column * self.row)]
-                cx = self._get_cx(line[0].index)
-                cy = self._get_cy(line[0].dir, line[0].index)
-                if ((abs(line[0].xmm) <= self.r and abs(line[0].ymm) <= self.r)
-                        or (abs(line[1].xmm) <= self.r and abs(line[1].ymm) <= self.r)):
-                    if not self.shape:
-                        x, y = cx - self.r, cy - self.r
-                        w, h = self.r * 2, self.r * 2
-                        out.write(f"initclip newpath {x} {y} moveto {w} 0 rlineto 0 {h} rlineto "
-                                  f"{-w} 0 rlineto closepath clip\n")
-                    if self.invert_color:
-                        out.write("1 setgray\n")  # white
-                    out.write(f"0.1 setlinewidth newpath {cx + line[0].xmm} {cy + line[0].ymm} moveto "
-                              f"{cx + line[1].xmm} {cy + line[1].ymm} lineto stroke\n")
-                    if not self.shape:
-                        out.write("initclip\n")
+        # 印刷用PDFには原盤番号以外の注記・星座線を入れない。
 
     def close(self):
         if self.outs is None:
             raise IOError("writer is closed")
         for out in self.outs:
-            out.write("showpage\n")
-            out.write("%%EOF\n")
-            out.close()
+            out.showPage()
+            out.save()
         self.outs = None
 
 

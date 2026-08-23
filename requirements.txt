@@ -1,2 +1,4 @@
 numpy>=1.24
 Pillow>=10.0
+reportlab>=4.0
+pypdf>=6.0

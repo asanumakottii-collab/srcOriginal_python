@@ -27,7 +27,13 @@ from config import load_properties
 from mathvector import MathVector
 from models import PlatePosition, SpherePosition
 from plate_polygon import PlateAssignmentPolygonGenerator
-from plate_writer import DEFAULT_OUTPUT_DIR, PlateWriterPS, PlateWriterSVG, PlateWriterType, resolve_output_path
+from plate_writer import (
+    DEFAULT_OUTPUT_DIR,
+    PlateWriterPDF,
+    PlateWriterSVG,
+    PlateWriterType,
+    resolve_output_path,
+)
 from sphere_reader import SphereReader
 from unit_arrangement import CustomUnitArrangement, InvalidUnitArrangementException, StandardUnitArrangement
 
@@ -254,7 +260,7 @@ def _usage():
     print("Usage:")
     print("\tpython transformer.py [options]")
     print("Options:")
-    print("\t-PS\t原板データをPostScript形式で出力します。")
+    print("\t-PDF\t原板データを印刷用PDF形式で出力します。")
     print("\t-f [configFile]\tプラネタリウムの設定を configFile から読み込みます。")
     print("\t--polygons\t原盤ごとの担当星域ポリゴンをSVG出力します。")
     print("\t-h,-help\tこのメッセージを表示します。")
@@ -386,8 +392,8 @@ def _init_plate_writer(props, writer_type):
         print("\t原板を" + ("黒色" if invert_color else "白色") + "、星を" + ("白色" if invert_color else "黒色") + "で書き出します。")
     if writer_type == PlateWriterType.SVG:
         return PlateWriterSVG(column, row, frame, True, filename_prefix, invert_color, output_dir)
-    if writer_type == PlateWriterType.POSTSCRIPT:
-        return PlateWriterPS(column, row, frame, True, filename_prefix, invert_color, output_dir)
+    if writer_type == PlateWriterType.PDF:
+        return PlateWriterPDF(column, row, frame, True, filename_prefix, invert_color, output_dir)
     return None
 
 
@@ -458,8 +464,11 @@ def main(argv=None):
     # コマンドライン引数を解釈
     i = 0
     while i < len(argv):
-        if argv[i].lower() == "-ps":
-            writer_type = PlateWriterType.POSTSCRIPT
+        if argv[i].lower() in ("-pdf", "--pdf"):
+            writer_type = PlateWriterType.PDF
+        elif argv[i].lower() == "-ps":
+            print("PostScript出力は廃止されました。-PDFを使用してください。", file=sys.stderr)
+            return 2
         elif argv[i] == "--polygons":
             force_polygons = True
         elif argv[i] == "-f":
@@ -490,13 +499,14 @@ def main(argv=None):
     _write_assignment_polygons(t, w, props, force_polygons)
     print("ユニットを配置しています。。。")
     t.process_stars(r, w, enlarge_rate)
-    print("星座を処理しますか。(y/N) ")
-    if input().lower() == "y":
-        t.process_constellations(r, w)
+    if writer_type == PlateWriterType.SVG:
+        print("星座を処理しますか。(y/N) ")
+        if input().lower() == "y":
+            t.process_constellations(r, w)
     print("データを発行しています。")
     w.close()
     print("完了しました。(`･ω･´) ｼｬｷｰﾝ")
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
