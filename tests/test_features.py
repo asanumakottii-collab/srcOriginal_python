@@ -80,9 +80,50 @@ class ConstellationStarTests(unittest.TestCase):
     def test_enlarge_formula_matches_fourth_magnitude_rule(self):
         base_radius = 0.25
         rmm = base_radius * math.pow(math.sqrt(2.512), -4)
-        actual = BasicTransformer.enlarge_constellation_star(rmm, base_radius, 1.0)
-        self.assertAlmostEqual(rmm * math.pow(100, 0.1), actual)
-        self.assertEqual(rmm, BasicTransformer.enlarge_constellation_star(rmm, base_radius, 0.0))
+        actual = BasicTransformer.enlarge_constellation_star(
+            rmm, base_radius, 1.0, magnitude=4.0
+        )
+        self.assertAlmostEqual(rmm * math.pow(10.0, 0.2), actual)
+        self.assertEqual(
+            rmm,
+            BasicTransformer.enlarge_constellation_star(rmm, base_radius, 0.0),
+        )
+
+    def test_bright_stars_use_fixed_width_gaussian_taper(self):
+        rmm = 0.25 * math.pow(math.sqrt(2.512), -2)
+        taper = math.exp(-math.pow((4.0 - 2.0) / 2.0, 2))
+        expected = rmm * math.pow(10.0, 0.2 * 1.5 * taper)
+        actual = BasicTransformer.enlarge_constellation_star(
+            rmm, 0.25, 1.5, magnitude=2.0
+        )
+        self.assertAlmostEqual(expected, actual)
+
+    def test_faint_stars_receive_the_full_magnitude_shift(self):
+        rmm = 0.25 * math.pow(math.sqrt(2.512), -5)
+        actual = BasicTransformer.enlarge_constellation_star(
+            rmm, 0.25, 2.0, magnitude=5.0
+        )
+        self.assertAlmostEqual(rmm * math.pow(10.0, 0.4), actual)
+
+    def test_enlarge_formula_keeps_legacy_call_signature(self):
+        base_radius = 0.25
+        rmm = base_radius * math.pow(10.0, -0.2 * 2.0)
+        explicit = BasicTransformer.enlarge_constellation_star(
+            rmm, base_radius, 1.5, magnitude=2.0
+        )
+        inferred = BasicTransformer.enlarge_constellation_star(rmm, base_radius, 1.5)
+        self.assertAlmostEqual(explicit, inferred)
+
+    def test_enlarged_radius_preserves_magnitude_order_at_maximum_rate(self):
+        enlarged_radii = []
+        for magnitude in [value / 10 for value in range(-10, 81)]:
+            rmm = 0.25 * math.pow(math.sqrt(2.512), -magnitude)
+            enlarged_radii.append(
+                BasicTransformer.enlarge_constellation_star(
+                    rmm, 0.25, 2.0, magnitude=magnitude
+                )
+            )
+        self.assertTrue(all(a > b for a, b in zip(enlarged_radii, enlarged_radii[1:])))
 
     def test_only_constellation_stars_are_enlarged(self):
         transformer = _IdentityTransformer()
@@ -92,10 +133,21 @@ class ConstellationStarTests(unittest.TestCase):
         )
         self.assertEqual(2, len(writer.stars))
         self.assertAlmostEqual(0.25 * math.pow(math.sqrt(2.512), -4), writer.stars[0].rmm)
-        self.assertGreater(writer.stars[1].rmm, writer.stars[0].rmm)
+        self.assertAlmostEqual(
+            0.25 * math.pow(math.sqrt(2.512), -4) * math.pow(10.0, 0.2),
+            writer.stars[1].rmm,
+        )
 
     def test_legacy_enlarge_property_name_is_supported(self):
         self.assertEqual(1.5, _init_enlarge_rate({"star-EnlargeRate": "1.5"}))
+
+    def test_enlarge_rate_must_be_between_zero_and_two(self):
+        self.assertEqual(0.0, _init_enlarge_rate({"star.enlarge-rate": "0.0"}))
+        self.assertEqual(2.0, _init_enlarge_rate({"star.enlarge-rate": "2.0"}))
+        for value in ("-0.1", "2.1", "nan"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    _init_enlarge_rate({"star.enlarge-rate": value})
 
 
 class SphereReaderTests(unittest.TestCase):

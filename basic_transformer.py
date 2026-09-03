@@ -26,6 +26,10 @@ from models import PlateConstellation, PlateStar
 
 
 class BasicTransformer(ABC):
+    CONSTELLATION_TAPER_BOUNDARY_MAGNITUDE = 4.0
+    CONSTELLATION_TAPER_WIDTH = 2.0
+    MAX_CONSTELLATION_ENLARGE_RATE = 2.0
+
     def __init__(self):
         self.radius = 0.0  # baseMagnitude等星の原板上の半径
         self.base_magnitude = 0.0  # 原板上の穴の大きさがradiusとなるような明るさ
@@ -71,21 +75,34 @@ class BasicTransformer(ABC):
         return pc
 
     @staticmethod
-    def enlarge_constellation_star(rmm, base_radius, enlarge_rate):
-        """Java版OTLの式で星座線構成星の穴半径を拡大します。"""
+    def enlarge_constellation_star(rmm, base_radius, enlarge_rate, magnitude=None):
+        """等級に対するガウス型テーパーで星座線構成星の穴半径を拡大します。
+
+        magnitudeを省略した旧形式の呼び出しでは、0等星のbase_radiusから等級を逆算します。
+        """
+        if not (
+            0.0
+            <= enlarge_rate
+            <= BasicTransformer.MAX_CONSTELLATION_ENLARGE_RATE
+        ):
+            raise ValueError("星座線構成星の拡大率には0以上2以下の値を指定してください。")
         if enlarge_rate == 0:
             return rmm
-        factor = math.pow(math.pow(100., 0.1), enlarge_rate)
-        fourth_magnitude_radius = base_radius * math.pow(math.sqrt(2.512), -4)
-        if fourth_magnitude_radius >= rmm:
-            return factor * rmm
-        taper = math.pow(
-            1 / math.pow(100., 0.1),
-            (100 * rmm - fourth_magnitude_radius * 100)
-            / (enlarge_rate + 0.4)
-            / math.pow(100., 0.1),
-        )
-        return rmm + rmm * (factor - 1) * taper
+
+        if magnitude is None:
+            if rmm <= 0 or base_radius <= 0:
+                raise ValueError("星の穴半径と0等星の基準半径には正の値を指定してください。")
+            magnitude = -5.0 * math.log10(rmm / base_radius)
+
+        boundary = BasicTransformer.CONSTELLATION_TAPER_BOUNDARY_MAGNITUDE
+        if magnitude >= boundary:
+            taper = 1.0
+        else:
+            distance = (boundary - magnitude) / BasicTransformer.CONSTELLATION_TAPER_WIDTH
+            taper = math.exp(-(distance * distance))
+
+        effective_magnitude_shift = enlarge_rate * taper
+        return rmm * math.pow(10.0, 0.2 * effective_magnitude_shift)
 
     def process_stars(self, r, w, enlarge_rate=0.0, constellation_hip_numbers=None):
         counter = 0
@@ -102,7 +119,9 @@ class BasicTransformer(ABC):
             if ps is None or ps.p is None:
                 continue
             if ps.hip_number in constellation_hip_numbers:
-                ps.rmm = self.enlarge_constellation_star(ps.rmm, self.radius, enlarge_rate)
+                ps.rmm = self.enlarge_constellation_star(
+                    ps.rmm, self.radius, enlarge_rate, magnitude=ss.vmag
+                )
                 enlarged_counter += 1
             if counter % 1000 == 0:
                 print(f"{counter}個目の星を変換しています。")
