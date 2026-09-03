@@ -12,9 +12,14 @@ from mathvector import MathVector
 from galaxy_transformer import _init_plate_writer as _init_galaxy_plate_writer
 from models import PlateConstellation, PlatePosition, PlateStar, SpherePosition, SphereStar
 from plate_polygon import PlateAssignmentPolygonGenerator
-from plate_writer import PlateWriterPDF, PlateWriterSVG, PlateWriterType
+from plate_writer import PlateWriterPDF, PlateWriterSVG, PlateWriterType, categorized_output_dir
 from sphere_reader import SphereReader
-from transformer import Transformer, _init_enlarge_rate, _init_plate_writer
+from transformer import (
+    Transformer,
+    _init_enlarge_rate,
+    _init_plate_writer,
+    _write_assignment_polygons,
+)
 from unit_arrangement import CustomUnitArrangement
 
 
@@ -202,6 +207,29 @@ class AssignmentPolygonTests(unittest.TestCase):
             self.assertAlmostEqual(95.5 * 96 / 25.4, first_x)
             self.assertAlmostEqual(69.25 * 96 / 25.4, first_y)
 
+    def test_polygon_generation_uses_its_own_output_category(self):
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "sys.stdout", new_callable=StringIO
+        ):
+            star_writer = PlateWriterSVG(
+                1, 1, 37.5, True, "star-", False, Path(directory, "star_SVG")
+            )
+            try:
+                _write_assignment_polygons(
+                    self.transformer,
+                    star_writer,
+                    {
+                        "output.directory": directory,
+                        "polygon.enabled": "yes",
+                        "polygon.samples": "12",
+                    },
+                )
+            finally:
+                star_writer.close()
+
+            self.assertTrue(Path(directory, "polygon", "polygon-0.svg").is_file())
+            self.assertFalse(Path(directory, "star_SVG", "polygon-0.svg").exists())
+
 
 def _plate_star(dir_=0, index=0, xmm=0.0, ymm=0.0, radius=0.5):
     star = PlateStar()
@@ -212,6 +240,35 @@ def _plate_star(dir_=0, index=0, xmm=0.0, ymm=0.0, radius=0.5):
     star.p.ymm = ymm
     star.rmm = radius
     return star
+
+
+class PlateFrameBoundaryTests(unittest.TestCase):
+    def test_circular_writer_rejects_square_corner_outside_radius(self):
+        with tempfile.TemporaryDirectory() as directory:
+            writer = PlateWriterSVG(1, 1, 40, True, "circle-", False, directory)
+            writer.write_star(_plate_star(xmm=35, ymm=35))
+            writer.write_star(_plate_star(xmm=24, ymm=32))
+            writer.close()
+
+            root = ET.parse(Path(directory, "circle-0.svg")).getroot()
+            star_holes = [
+                element
+                for element in root.findall("{http://www.w3.org/2000/svg}circle")
+                if "stroke" not in element.attrib
+            ]
+            self.assertEqual(1, len(star_holes))
+            self.assertEqual("119.5mm", star_holes[0].attrib["cx"])
+            self.assertEqual("101.25mm", star_holes[0].attrib["cy"])
+
+    def test_rectangular_writer_keeps_square_corner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            writer = PlateWriterSVG(1, 1, 40, False, "rectangle-", False, directory)
+            writer.write_star(_plate_star(xmm=35, ymm=35))
+            writer.close()
+
+            root = ET.parse(Path(directory, "rectangle-0.svg")).getroot()
+            star_holes = root.findall("{http://www.w3.org/2000/svg}circle")
+            self.assertEqual(1, len(star_holes))
 
 
 @unittest.skipUnless(_HAS_REPORTLAB, "ReportLab is required for PDF writer tests")
@@ -236,9 +293,25 @@ class PDFWriterTests(unittest.TestCase):
             try:
                 self.assertIsInstance(star_writer, PlateWriterPDF)
                 self.assertIsInstance(galaxy_writer, PlateWriterPDF)
+                self.assertEqual(Path(directory, "star_pdf"), Path(star_writer.output_dir))
+                self.assertEqual(Path(directory, "galaxy"), Path(galaxy_writer.output_dir))
             finally:
                 star_writer.close()
                 galaxy_writer.close()
+
+    @unittest.skipUnless(_HAS_PYPDF, "pypdf is required for PDF structure tests")
+    def test_pdf_circular_writer_uses_radial_boundary(self):
+        from pypdf import PdfReader
+
+        with tempfile.TemporaryDirectory() as directory:
+            writer = PlateWriterPDF(1, 1, 40, True, "print-", False, directory)
+            writer.write_star(_plate_star(xmm=35, ymm=35))
+            writer.write_star(_plate_star(xmm=24, ymm=32))
+            writer.close()
+
+            operations = PdfReader(Path(directory, "print-0.pdf")).pages[0].get_contents().operations
+            # 北天・南天の枠2円と、半径40 mm上の星穴1円だけが残る。
+            self.assertEqual(12, sum(operator == b"c" for _, operator in operations))
 
     @unittest.skipUnless(_HAS_PYPDF, "pypdf is required for PDF structure tests")
     def test_pdf_is_print_sized_vector_and_contains_only_plate_numbers(self):
@@ -277,6 +350,24 @@ class PDFWriterTests(unittest.TestCase):
 
 
 class OutputFormatCLITests(unittest.TestCase):
+    def test_output_categories_are_created_below_the_configured_root(self):
+        self.assertEqual(
+            Path("custom-output", "star_SVG"),
+            Path(categorized_output_dir("custom-output", "star_SVG")),
+        )
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "sys.stdout", new_callable=StringIO
+        ):
+            writer = _init_plate_writer(
+                {"output.directory": directory}, PlateWriterType.SVG
+            )
+            try:
+                self.assertEqual(Path(directory, "star_SVG"), Path(writer.output_dir))
+                writer.write_star(_plate_star())
+            finally:
+                writer.close()
+            self.assertTrue(Path(directory, "star_SVG", "star-0.svg").is_file())
+
     def test_deprecated_postscript_option_stops_both_commands(self):
         from galaxy_transformer import main as galaxy_main
         from transformer import main as star_main

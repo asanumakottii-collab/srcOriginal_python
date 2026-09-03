@@ -25,7 +25,13 @@ import sys
 from basic_transformer import BasicTransformer
 from config import load_properties
 from models import PlatePosition
-from plate_writer import DEFAULT_OUTPUT_DIR, PlateWriterPDF, PlateWriterSVG, PlateWriterType
+from plate_writer import (
+    DEFAULT_OUTPUT_DIR,
+    PlateWriterPDF,
+    PlateWriterSVG,
+    PlateWriterType,
+    categorized_output_dir,
+)
 from sphere_reader import SphereReader
 
 
@@ -150,7 +156,7 @@ def _init_sphere_reader(props):
 def _init_plate_writer(props, writer_type):
     filename_prefix = "galaxy-"
     invert_color = True
-    output_dir = _get_output_dir(props)
+    output_dir = categorized_output_dir(_get_output_dir(props), "galaxy")
     if props is None:  # interactive mode
         print("横に各天のユニットをいくつ配置しますか。(default=1) ")
         column = BasicTransformer.parse_int_with_default(input(), 1)

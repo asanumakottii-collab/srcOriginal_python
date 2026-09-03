@@ -43,6 +43,12 @@ def resolve_output_path(output_dir, filename):
     return path
 
 
+def categorized_output_dir(output_dir, category):
+    """出力ルート配下の分類別フォルダを返します。"""
+    output_dir = (output_dir or DEFAULT_OUTPUT_DIR).strip() or DEFAULT_OUTPUT_DIR
+    return os.path.join(output_dir, category)
+
+
 class PlateWriterType(Enum):
     SVG = "SVG"
     PDF = "PDF"
@@ -100,6 +106,14 @@ class _PlateWriterBase(PlateWriter):
 
     def _output_path(self, extension):
         return resolve_output_path(self.output_dir, f"{self.filename_prefix}{self.number_of_page}.{extension}")
+
+    def _is_position_in_frame(self, x, y):
+        """原盤上の中心座標が、実際に描画する枠の内側かを返します。"""
+        if not math.isfinite(x) or not math.isfinite(y):
+            return False
+        if self.shape:
+            return math.hypot(x, y) <= self.r
+        return abs(x) <= self.r and abs(y) <= self.r
 
     def __del__(self):
         if getattr(self, "outs", None) is not None:
@@ -184,8 +198,7 @@ class PlateWriterPDF(_PlateWriterBase):
         if self.outs is None:
             raise IOError("writer is closed")
         self._write_frame(s.p.index)
-        if (abs(s.p.xmm) > self.r or abs(s.p.ymm) > self.r
-                or not math.isfinite(s.p.xmm) or not math.isfinite(s.p.ymm)
+        if (not self._is_position_in_frame(s.p.xmm, s.p.ymm)
                 or not math.isfinite(s.rmm) or s.rmm <= 0):
             return
         out = self.outs[s.p.index // (self.column * self.row)]
@@ -257,7 +270,7 @@ class PlateWriterSVG(_PlateWriterBase):
         if self.outs is None:
             raise IOError("writer is closed")
         self._write_frame(s.p.index)
-        if abs(s.p.xmm) > self.r or abs(s.p.ymm) > self.r:
+        if not self._is_position_in_frame(s.p.xmm, s.p.ymm):
             return
         out = self.outs[s.p.index // (self.column * self.row)]
         cx = self._get_cx(s.p.index)

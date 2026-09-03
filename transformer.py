@@ -32,6 +32,7 @@ from plate_writer import (
     PlateWriterPDF,
     PlateWriterSVG,
     PlateWriterType,
+    categorized_output_dir,
     resolve_output_path,
 )
 from sphere_reader import SphereReader
@@ -371,7 +372,7 @@ def _init_plate_writer(props, writer_type):
     """設定を読み込み、PlateWriter のインスタンスを作成します。"""
     filename_prefix = "star-"
     invert_color = False
-    output_dir = _get_output_dir(props)
+    output_root = _get_output_dir(props)
     if props is None:  # interactive mode
         print("横に各天のユニットをいくつ配置しますか。(default=1) ")
         column = BasicTransformer.parse_int_with_default(input(), 1)
@@ -388,11 +389,14 @@ def _init_plate_writer(props, writer_type):
         print(f"\t横に各天のユニットを {column} 個配置します。")
         print(f"\t縦に各天のユニットを {row} 個配置します。")
         print(f"\t枠の半径は {frame} mm です。")
-        print(f"\t出力フォルダは {output_dir} です。")
         print("\t原板を" + ("黒色" if invert_color else "白色") + "、星を" + ("白色" if invert_color else "黒色") + "で書き出します。")
     if writer_type == PlateWriterType.SVG:
+        output_dir = categorized_output_dir(output_root, "star_SVG")
+        print(f"\t出力フォルダは {output_dir} です。")
         return PlateWriterSVG(column, row, frame, True, filename_prefix, invert_color, output_dir)
     if writer_type == PlateWriterType.PDF:
+        output_dir = categorized_output_dir(output_root, "star_pdf")
+        print(f"\t出力フォルダは {output_dir} です。")
         return PlateWriterPDF(column, row, frame, True, filename_prefix, invert_color, output_dir)
     return None
 
@@ -443,7 +447,7 @@ def _write_assignment_polygons(transformer, plate_writer, props, force=False):
         plate_writer.shape,
         filename_prefix,
         True,  # ポリゴン原盤は常に黒地に白い投影領域で出力する。
-        plate_writer.output_dir,
+        categorized_output_dir(_get_output_dir(props), "polygon"),
     )
     try:
         count = 0
@@ -494,7 +498,10 @@ def main(argv=None):
     enlarge_rate = _init_enlarge_rate(props)
     if props is not None and props.get("unit-position-file") is not None:
         print("ユニットの配置を画像に出力しています。")
-        unit_position_file = resolve_output_path(_get_output_dir(props), props["unit-position-file"])
+        unit_position_file = resolve_output_path(
+            categorized_output_dir(_get_output_dir(props), "unit_position"),
+            props["unit-position-file"],
+        )
         t.write_unit_position(500).save(unit_position_file)
     _write_assignment_polygons(t, w, props, force_polygons)
     print("ユニットを配置しています。。。")
