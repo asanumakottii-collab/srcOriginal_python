@@ -417,6 +417,56 @@ def _init_enlarge_rate(props):
     return enlarge_rate
 
 
+def _parse_constellation_names(value):
+    """カンマまたは改行で区切られた星座名を読み取ります。"""
+    names = []
+    for line in value.splitlines():
+        stripped_line = line.strip()
+        if not stripped_line or stripped_line.startswith(("#", "!")):
+            continue
+        for name in stripped_line.split(","):
+            name = name.strip()
+            if name and name not in names:
+                names.append(name)
+    return tuple(names)
+
+
+def _init_enlarge_constellation_names(props):
+    """拡大する星座の IAU88.hlc ``Name`` を読み込みます。"""
+    if props is None:
+        print(
+            "拡大する星座のNameを1行に1つ羅列したファイル名を"
+            "入力してください。(空欄で全星座)"
+        )
+        path = input().strip()
+        if path == "":
+            names = None
+        else:
+            with open(path, encoding="utf-8") as f:
+                names = _parse_constellation_names(f.read())
+    else:
+        value = props.get(
+            "star.enlarge-constellations",
+            props.get("star-EnlargeConstellations"),
+        )
+        names = None if value is None or value.strip() == "" else _parse_constellation_names(value)
+
+    if names is None:
+        print("\t拡大対象はすべての星座です。")
+        return None
+
+    # 星の処理を開始する前に誤記を検出する。
+    known_names = set(SphereReader.constellation_names())
+    unknown_names = [name for name in names if name not in known_names]
+    if unknown_names:
+        raise ValueError(
+            "IAU88.hlcに存在しない星座名です: "
+            + ", ".join(unknown_names)
+        )
+    print("\t拡大対象の星座: " + ", ".join(names))
+    return names
+
+
 def _write_assignment_polygons(transformer, plate_writer, props, force=False):
     """設定に応じて全原盤の担当星域ポリゴンをSVG出力します。"""
     if props is None:
@@ -496,6 +546,9 @@ def main(argv=None):
     r = _init_sphere_reader(props)
     w = _init_plate_writer(props, writer_type)
     enlarge_rate = _init_enlarge_rate(props)
+    constellation_names = (
+        _init_enlarge_constellation_names(props) if enlarge_rate != 0 else None
+    )
     if props is not None and props.get("unit-position-file") is not None:
         print("ユニットの配置を画像に出力しています。")
         unit_position_file = resolve_output_path(
@@ -505,7 +558,12 @@ def main(argv=None):
         t.write_unit_position(500).save(unit_position_file)
     _write_assignment_polygons(t, w, props, force_polygons)
     print("ユニットを配置しています。。。")
-    t.process_stars(r, w, enlarge_rate)
+    t.process_stars(
+        r,
+        w,
+        enlarge_rate,
+        constellation_names=constellation_names,
+    )
     if writer_type == PlateWriterType.SVG:
         print("星座を処理しますか。(y/N) ")
         if input().lower() == "y":

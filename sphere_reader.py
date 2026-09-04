@@ -80,25 +80,64 @@ class SphereReader:
         self._excluding_stars.add(str(hip_number))
 
     @staticmethod
-    def constellation_star_hip_numbers():
-        """星座線を構成する恒星のHIP番号を返します。
-
-        IAU88.hlc の ``HIP: { ... }`` ブロックを基本データとし、Java版で追加された補助CSVが同じフォルダにあれば、そのHIP番号も併合します。星座ストリームとは別にファイルを開くため、read_constellation() の読み取り位置には影響しません。
-        """
-        hip_numbers = set(_LEGACY_CONSTELLATION_STAR_HIP_NUMBERS)
+    def _constellation_hip_numbers_by_name():
+        """IAU88.hlc の星座名とHIP番号の対応を読み込みます。"""
+        hip_numbers_by_name = {}
+        current_name = None
         in_hip_block = False
         with open(os.path.join(_DATA_DIR, "IAU88.hlc"), encoding="utf-8") as f:
             for raw_line in f:
                 line = raw_line.strip()
-                if line == "HIP: {":
-                    in_hip_block = True
-                    continue
-                if not in_hip_block:
-                    continue
-                if line == "}":
+                if line.startswith("Name:"):
+                    current_name = line.split(":", 1)[1].strip()
+                    hip_numbers_by_name.setdefault(current_name, set())
                     in_hip_block = False
-                elif line and line != "-1":
-                    hip_numbers.add(int(line))
+                elif line == "HIP: {":
+                    in_hip_block = True
+                elif in_hip_block and line == "}":
+                    in_hip_block = False
+                elif in_hip_block and line and line != "-1":
+                    if current_name is None:
+                        raise ValueError("IAU88.hlcのHIPブロックに星座名がありません。")
+                    hip_numbers_by_name[current_name].add(int(line))
+        return hip_numbers_by_name
+
+    @staticmethod
+    def constellation_names():
+        """IAU88.hlc に記載された ``Name`` をファイル順で返します。"""
+        return tuple(SphereReader._constellation_hip_numbers_by_name())
+
+    @staticmethod
+    def constellation_star_hip_numbers(constellation_names=None):
+        """星座線を構成する恒星のHIP番号を返します。
+
+        ``constellation_names`` に IAU88.hlc の ``Name`` を指定すると、
+        指定星座のHIP番号だけを返します。``None`` の場合は従来どおり
+        全星座を対象とし、Java版の補助CSVにだけ含まれる星も併合します。
+        補助CSVには星座名がないため、星座を指定した場合は併合しません。
+        """
+        hip_numbers_by_name = SphereReader._constellation_hip_numbers_by_name()
+
+        if constellation_names is not None:
+            if isinstance(constellation_names, str):
+                constellation_names = [constellation_names]
+            selected_names = tuple(dict.fromkeys(constellation_names))
+            unknown_names = [
+                name for name in selected_names if name not in hip_numbers_by_name
+            ]
+            if unknown_names:
+                raise ValueError(
+                    "IAU88.hlcに存在しない星座名です: "
+                    + ", ".join(unknown_names)
+                )
+            hip_numbers = set()
+            for name in selected_names:
+                hip_numbers.update(hip_numbers_by_name[name])
+            return hip_numbers
+
+        hip_numbers = set(_LEGACY_CONSTELLATION_STAR_HIP_NUMBERS)
+        for constellation_hip_numbers in hip_numbers_by_name.values():
+            hip_numbers.update(constellation_hip_numbers)
 
         csv_path = os.path.join(_DATA_DIR, "hip_constellation_line_star.csv")
         if os.path.exists(csv_path):

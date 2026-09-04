@@ -104,13 +104,25 @@ class BasicTransformer(ABC):
         effective_magnitude_shift = enlarge_rate * taper
         return rmm * math.pow(10.0, 0.2 * effective_magnitude_shift)
 
-    def process_stars(self, r, w, enlarge_rate=0.0, constellation_hip_numbers=None):
+    def process_stars(
+        self,
+        r,
+        w,
+        enlarge_rate=0.0,
+        constellation_hip_numbers=None,
+        constellation_names=None,
+    ):
         counter = 0
         enlarged_counter = 0
         if constellation_hip_numbers is None:
-            constellation_hip_numbers = (
-                r.constellation_star_hip_numbers() if enlarge_rate != 0 else set()
-            )
+            if enlarge_rate == 0:
+                constellation_hip_numbers = set()
+            elif constellation_names is None:
+                constellation_hip_numbers = r.constellation_star_hip_numbers()
+            else:
+                constellation_hip_numbers = r.constellation_star_hip_numbers(
+                    constellation_names
+                )
         while True:
             ss = r.read_star()
             if ss is None:
