@@ -82,6 +82,8 @@ python3 transformer.py --polygons -f starconfig.properties
 python3 galaxy_transformer.py -f galaxyconfig.properties
 ```
 
+`transformer.py` の対話モードでは、`star_SVG`、`star_pdf`、`polygon_SVG`、`polygon_pdf` をそれぞれ出力するか選択できます。複数の形式を同時に選択することもできます。未入力時は従来どおり `star_SVG` のみを出力します。
+
 主なオプション:
 
 - `-f [configFile]` — プラネタリウムの設定を `.properties` ファイルから読み込む

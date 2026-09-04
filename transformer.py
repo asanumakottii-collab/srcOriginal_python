@@ -380,6 +380,8 @@ def _init_plate_writer(props, writer_type):
         row = BasicTransformer.parse_int_with_default(input(), 1)
         print("枠の半径は何mmですか。(default=0.) ")
         frame = BasicTransformer.parse_double_with_default(input(), 0.)
+        print("原板を黒色、星を白色で書き出しますか。(y/N) ")
+        invert_color = BasicTransformer.parse_boolean_with_default(input(), False)
     else:  # non-interactive mode
         column = BasicTransformer.parse_int_with_default(props.get("plate.column"), 1)
         row = BasicTransformer.parse_int_with_default(props.get("plate.row"), 1)
@@ -399,6 +401,83 @@ def _init_plate_writer(props, writer_type):
         print(f"\t出力フォルダは {output_dir} です。")
         return PlateWriterPDF(column, row, frame, True, filename_prefix, invert_color, output_dir)
     return None
+
+
+def _select_interactive_output_types():
+    """対話モードで出力する原盤の種類を選択します。"""
+    print("star_SVGを出力しますか。(Y/n) ")
+    star_svg = BasicTransformer.parse_boolean_with_default(input(), True)
+    print("star_pdfを出力しますか。(y/N) ")
+    star_pdf = BasicTransformer.parse_boolean_with_default(input(), False)
+    print("polygon_SVGを出力しますか。(y/N) ")
+    polygon_svg = BasicTransformer.parse_boolean_with_default(input(), False)
+    print("polygon_pdfを出力しますか。(y/N) ")
+    polygon_pdf = BasicTransformer.parse_boolean_with_default(input(), False)
+
+    star_types = []
+    polygon_types = []
+    if star_svg:
+        star_types.append(PlateWriterType.SVG)
+    if star_pdf:
+        star_types.append(PlateWriterType.PDF)
+    if polygon_svg:
+        polygon_types.append(PlateWriterType.SVG)
+    if polygon_pdf:
+        polygon_types.append(PlateWriterType.PDF)
+    return star_types, polygon_types
+
+
+def _matching_plate_writer(source, writer_type, props):
+    """対話で読み込んだ原盤設定を保ったまま、別形式の writer を作ります。"""
+    if writer_type == PlateWriterType.SVG:
+        writer_class = PlateWriterSVG
+        output_category = "star_SVG"
+    else:
+        writer_class = PlateWriterPDF
+        output_category = "star_pdf"
+    output_dir = categorized_output_dir(_get_output_dir(props), output_category)
+    print(f"\t出力フォルダは {output_dir} です。")
+    return writer_class(
+        source.column,
+        source.row,
+        source.r,
+        source.shape,
+        source.filename_prefix,
+        source.invert_color,
+        output_dir,
+    )
+
+
+def _init_plate_writers(props, writer_types):
+    """共通の原盤設定を使う複数形式の writer を作ります。"""
+    if not writer_types:
+        return {}
+    writers = {writer_types[0]: _init_plate_writer(props, writer_types[0])}
+    for writer_type in writer_types[1:]:
+        writers[writer_type] = _matching_plate_writer(
+            writers[writer_types[0]], writer_type, props
+        )
+    return writers
+
+
+class _PlateWriterGroup:
+    """星と星座の書き込みを複数の writer へ配ります。"""
+
+    def __init__(self, output_writers, managed_writers):
+        self.output_writers = output_writers
+        self.managed_writers = managed_writers
+
+    def write_star(self, star):
+        for writer in self.output_writers:
+            writer.write_star(star)
+
+    def write_constellation(self, constellation):
+        for writer in self.output_writers:
+            writer.write_constellation(constellation)
+
+    def close(self):
+        for writer in self.managed_writers:
+            writer.close()
 
 
 def _init_enlarge_rate(props):
@@ -471,6 +550,7 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     BasicTransformer.print_version_and_license()
     writer_type = PlateWriterType.SVG
+    writer_type_explicit = False
     config_file_name = None
     force_polygons = False
     # コマンドライン引数を解釈
@@ -478,6 +558,7 @@ def main(argv=None):
     while i < len(argv):
         if argv[i].lower() in ("-pdf", "--pdf"):
             writer_type = PlateWriterType.PDF
+            writer_type_explicit = True
         elif argv[i].lower() == "-ps":
             print("PostScript出力は廃止されました。-PDFを使用してください。", file=sys.stderr)
             return 2
@@ -502,8 +583,32 @@ def main(argv=None):
         print("エラーが発生したようなのでOTLを終了します。", file=sys.stderr)
         return
     r = _init_sphere_reader(props)
-    w = _init_plate_writer(props, writer_type)
-    enlarge_rate = _init_enlarge_rate(props)
+    interactive_output_selection = (
+        props is None and not writer_type_explicit and not force_polygons
+    )
+    if interactive_output_selection:
+        star_writer_types, polygon_writer_types = _select_interactive_output_types()
+        requested_writer_types = [
+            candidate
+            for candidate in (PlateWriterType.SVG, PlateWriterType.PDF)
+            if candidate in star_writer_types or candidate in polygon_writer_types
+        ]
+        if not requested_writer_types:
+            print("出力形式が選択されなかったため、OTLを終了します。")
+            return
+        writers = _init_plate_writers(props, requested_writer_types)
+        star_writers = [writers[selected] for selected in star_writer_types]
+        if len(star_writers) == 1 and len(writers) == 1:
+            w = star_writers[0]
+        else:
+            w = _PlateWriterGroup(star_writers, list(writers.values()))
+    else:
+        star_writer_types = [writer_type]
+        polygon_writer_types = None
+        writers = {writer_type: _init_plate_writer(props, writer_type)}
+        w = writers[writer_type]
+
+    enlarge_rate = _init_enlarge_rate(props) if star_writer_types else 0.0
     if props is not None and props.get("unit-position-file") is not None:
         print("ユニットの配置を画像に出力しています。")
         unit_position_file = resolve_output_path(
@@ -511,12 +616,17 @@ def main(argv=None):
             props["unit-position-file"],
         )
         t.write_unit_position(500).save(unit_position_file)
-    _write_assignment_polygons(t, w, props, force_polygons)
-    print("ユニットを配置しています。。。")
-    t.process_stars(r, w, enlarge_rate)
-    print("星座を処理しますか。(y/N) ")
-    if input().lower() == "y":
-        t.process_constellations(r, w)
+    if polygon_writer_types is None:
+        _write_assignment_polygons(t, w, props, force_polygons)
+    else:
+        for selected in polygon_writer_types:
+            _write_assignment_polygons(t, writers[selected], props, force=True)
+    if star_writer_types:
+        print("ユニットを配置しています。。。")
+        t.process_stars(r, w, enlarge_rate)
+        print("星座を処理しますか。(y/N) ")
+        if input().lower() == "y":
+            t.process_constellations(r, w)
     print("データを発行しています。")
     w.close()
     print("完了しました。(`･ω･´) ｼｬｷｰﾝ")

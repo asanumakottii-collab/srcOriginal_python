@@ -15,9 +15,11 @@ from plate_polygon import PlateAssignmentPolygonGenerator
 from plate_writer import PlateWriterPDF, PlateWriterSVG, PlateWriterType, categorized_output_dir
 from sphere_reader import SphereReader
 from transformer import (
+    _PlateWriterGroup,
     Transformer,
     _init_enlarge_rate,
     _init_plate_writer,
+    _select_interactive_output_types,
     _write_assignment_polygons,
 )
 from unit_arrangement import CustomUnitArrangement
@@ -391,6 +393,103 @@ class PDFWriterTests(unittest.TestCase):
 
 
 class OutputFormatCLITests(unittest.TestCase):
+    def test_interactive_output_types_can_select_all_four_outputs(self):
+        with (
+            patch("builtins.input", side_effect=["", "yes", "true", "y"]),
+            patch("sys.stdout", new_callable=StringIO),
+        ):
+            star_types, polygon_types = _select_interactive_output_types()
+
+        self.assertEqual(
+            [PlateWriterType.SVG, PlateWriterType.PDF], star_types
+        )
+        self.assertEqual(
+            [PlateWriterType.SVG, PlateWriterType.PDF], polygon_types
+        )
+
+    def test_interactive_output_types_default_to_star_svg_only(self):
+        with (
+            patch("builtins.input", side_effect=["", "", "", ""]),
+            patch("sys.stdout", new_callable=StringIO),
+        ):
+            star_types, polygon_types = _select_interactive_output_types()
+
+        self.assertEqual([PlateWriterType.SVG], star_types)
+        self.assertEqual([], polygon_types)
+
+    def test_interactive_main_routes_stars_and_polygons_to_both_formats(self):
+        from transformer import main as star_main
+
+        transformer = MagicMock()
+        reader = MagicMock()
+        svg_writer = MagicMock()
+        pdf_writer = MagicMock()
+        writers = {
+            PlateWriterType.SVG: svg_writer,
+            PlateWriterType.PDF: pdf_writer,
+        }
+        both_types = [PlateWriterType.SVG, PlateWriterType.PDF]
+        with (
+            patch("transformer._init_transformer", return_value=transformer),
+            patch("transformer._init_sphere_reader", return_value=reader),
+            patch(
+                "transformer._select_interactive_output_types",
+                return_value=(both_types, both_types),
+            ),
+            patch("transformer._init_plate_writers", return_value=writers),
+            patch("transformer._init_enlarge_rate", return_value=0.0),
+            patch("transformer._write_assignment_polygons") as write_polygons,
+            patch("builtins.input", return_value="n"),
+            patch("sys.stdout", new_callable=StringIO),
+        ):
+            star_main([])
+
+        output_writer = transformer.process_stars.call_args.args[1]
+        self.assertIsInstance(output_writer, _PlateWriterGroup)
+        self.assertEqual([svg_writer, pdf_writer], output_writer.output_writers)
+        self.assertEqual(
+            [
+                ((transformer, svg_writer, None), {"force": True}),
+                ((transformer, pdf_writer, None), {"force": True}),
+            ],
+            [(call.args, call.kwargs) for call in write_polygons.call_args_list],
+        )
+        svg_writer.close.assert_called_once_with()
+        pdf_writer.close.assert_called_once_with()
+
+    def test_interactive_svg_writer_can_invert_plate_and_star_colors(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("transformer.DEFAULT_OUTPUT_DIR", directory),
+            patch("builtins.input", side_effect=["1", "1", "0", "yes"]),
+            patch("sys.stdout", new_callable=StringIO) as stdout,
+        ):
+            writer = _init_plate_writer(None, PlateWriterType.SVG)
+            try:
+                self.assertTrue(writer.invert_color)
+                writer.write_star(_plate_star())
+            finally:
+                writer.close()
+
+            root = ET.parse(Path(directory, "star_SVG", "star-0.svg")).getroot()
+            circles = root.findall("{http://www.w3.org/2000/svg}circle")
+            self.assertEqual("black", circles[0].attrib["fill"])
+            self.assertEqual("white", circles[-1].attrib["fill"])
+            self.assertIn("原板を黒色、星を白色", stdout.getvalue())
+
+    def test_interactive_svg_writer_keeps_non_inverted_default(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("transformer.DEFAULT_OUTPUT_DIR", directory),
+            patch("builtins.input", side_effect=["", "", "", ""]),
+            patch("sys.stdout", new_callable=StringIO),
+        ):
+            writer = _init_plate_writer(None, PlateWriterType.SVG)
+            try:
+                self.assertFalse(writer.invert_color)
+            finally:
+                writer.close()
+
     def test_output_categories_are_created_below_the_configured_root(self):
         self.assertEqual(
             Path("custom-output", "star_SVG"),
