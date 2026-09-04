@@ -5,7 +5,7 @@ import unittest
 import xml.etree.ElementTree as ET
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from basic_transformer import BasicTransformer
 from mathvector import MathVector
@@ -207,7 +207,7 @@ class AssignmentPolygonTests(unittest.TestCase):
             self.assertAlmostEqual(95.5 * 96 / 25.4, first_x)
             self.assertAlmostEqual(69.25 * 96 / 25.4, first_y)
 
-    def test_polygon_generation_uses_its_own_output_category(self):
+    def test_polygon_generation_uses_svg_output_category(self):
         with tempfile.TemporaryDirectory() as directory, patch(
             "sys.stdout", new_callable=StringIO
         ):
@@ -227,8 +227,33 @@ class AssignmentPolygonTests(unittest.TestCase):
             finally:
                 star_writer.close()
 
-            self.assertTrue(Path(directory, "polygon", "polygon-0.svg").is_file())
+            self.assertTrue(Path(directory, "polygon_SVG", "polygon-0.svg").is_file())
             self.assertFalse(Path(directory, "star_SVG", "polygon-0.svg").exists())
+
+    @unittest.skipUnless(_HAS_REPORTLAB, "ReportLab is required for PDF writer tests")
+    def test_polygon_generation_uses_pdf_output_category_with_pdf_writer(self):
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "sys.stdout", new_callable=StringIO
+        ):
+            star_writer = PlateWriterPDF(
+                1, 1, 37.5, True, "star-", False, Path(directory, "star_pdf")
+            )
+            try:
+                _write_assignment_polygons(
+                    self.transformer,
+                    star_writer,
+                    {
+                        "output.directory": directory,
+                        "polygon.enabled": "yes",
+                        "polygon.samples": "12",
+                    },
+                )
+            finally:
+                star_writer.close()
+
+            output = Path(directory, "polygon_pdf", "polygon-0.pdf")
+            self.assertTrue(output.read_bytes().startswith(b"%PDF-"))
+            self.assertFalse(Path(directory, "polygon_SVG", "polygon-0.svg").exists())
 
 
 def _plate_star(dir_=0, index=0, xmm=0.0, ymm=0.0, radius=0.5):
@@ -300,6 +325,25 @@ class PDFWriterTests(unittest.TestCase):
                 galaxy_writer.close()
 
     @unittest.skipUnless(_HAS_PYPDF, "pypdf is required for PDF structure tests")
+    def test_pdf_writer_draws_assignment_polygon(self):
+        from pypdf import PdfReader
+
+        with tempfile.TemporaryDirectory() as directory:
+            writer = PlateWriterPDF(1, 1, 37.5, True, "polygon-", True, directory)
+            writer.write_assignment_polygon(0, 0, [(0, 0), (10, 0), (0, 10)])
+            writer.close()
+
+            output = Path(directory, "polygon-0.pdf")
+            self.assertTrue(output.read_bytes().startswith(b"%PDF-"))
+            page = PdfReader(output).pages[0]
+            operators = [operator for _, operator in page.get_contents().operations]
+            self.assertIn(b"m", operators)
+            self.assertIn(b"l", operators)
+            self.assertIn(b"h", operators)
+            self.assertIn(b"B*", operators)
+            self.assertEqual([], list(page.images))
+
+    @unittest.skipUnless(_HAS_PYPDF, "pypdf is required for PDF structure tests")
     def test_pdf_circular_writer_uses_radial_boundary(self):
         from pypdf import PdfReader
 
@@ -314,7 +358,7 @@ class PDFWriterTests(unittest.TestCase):
             self.assertEqual(12, sum(operator == b"c" for _, operator in operations))
 
     @unittest.skipUnless(_HAS_PYPDF, "pypdf is required for PDF structure tests")
-    def test_pdf_is_print_sized_vector_and_contains_only_plate_numbers(self):
+    def test_pdf_is_print_sized_vector_and_supports_constellations(self):
         from pypdf import PdfReader
 
         with tempfile.TemporaryDirectory() as directory:
@@ -325,14 +369,15 @@ class PDFWriterTests(unittest.TestCase):
             constellation = PlateConstellation()
             constellation.name = "Orion"
             constellation.p = PlatePosition()
-            constellation.ll = [[PlatePosition(), PlatePosition()]]
+            constellation.p.xmm = 0.0
+            constellation.p.ymm = 10.0
+            line_start = PlatePosition()
+            line_start.xmm = -12.0
+            line_end = PlatePosition()
+            line_end.xmm = 12.0
+            constellation.ll = [[line_start, line_end]]
             writer.write_constellation(constellation)
             writer.close()
-
-            plain_writer = PlateWriterPDF(1, 1, 37.5, True, "plain-", True, directory)
-            plain_writer.write_star(_plate_star(dir_=0, xmm=-5.0, ymm=3.0))
-            plain_writer.write_star(_plate_star(dir_=1, xmm=4.0, ymm=-2.0))
-            plain_writer.close()
 
             reader = PdfReader(Path(directory, "print-0.pdf"))
             self.assertEqual(1, len(reader.pages))
@@ -340,13 +385,9 @@ class PDFWriterTests(unittest.TestCase):
             point_to_mm = 25.4 / 72
             self.assertAlmostEqual(191, float(page.mediabox.width) * point_to_mm, places=3)
             self.assertAlmostEqual(277, float(page.mediabox.height) * point_to_mm, places=3)
-            self.assertEqual(["N0", "S0"], page.extract_text().split())
+            self.assertEqual(["N0", "S0", "Orion"], page.extract_text().split())
             self.assertEqual([], list(page.images))
-            self.assertNotIn(b"l", [operator for _, operator in page.get_contents().operations])
-            self.assertEqual(
-                Path(directory, "plain-0.pdf").read_bytes(),
-                Path(directory, "print-0.pdf").read_bytes(),
-            )
+            self.assertIn(b"l", [operator for _, operator in page.get_contents().operations])
 
 
 class OutputFormatCLITests(unittest.TestCase):
@@ -377,6 +418,40 @@ class OutputFormatCLITests(unittest.TestCase):
                   patch("sys.stderr", new_callable=StringIO) as stderr):
                 self.assertEqual(2, main(["-PS"]))
                 self.assertIn("-PDF", stderr.getvalue())
+
+    def test_pdf_mode_processes_constellations_in_star_command(self):
+        from transformer import main as star_main
+
+        transformer = MagicMock()
+        reader = MagicMock()
+        writer = MagicMock()
+        with (patch("transformer._init_transformer", return_value=transformer),
+              patch("transformer._init_sphere_reader", return_value=reader),
+              patch("transformer._init_plate_writer", return_value=writer),
+              patch("transformer._init_enlarge_rate", return_value=0.0),
+              patch("transformer._write_assignment_polygons"),
+              patch("builtins.input", return_value="y"),
+              patch("sys.stdout", new_callable=StringIO) as stdout):
+            star_main(["-PDF"])
+
+        self.assertIn("星座を処理しますか。(y/N)", stdout.getvalue())
+        transformer.process_constellations.assert_called_once_with(reader, writer)
+
+    def test_pdf_mode_processes_constellations_in_galaxy_command(self):
+        from galaxy_transformer import main as galaxy_main
+
+        transformer = MagicMock()
+        reader = MagicMock()
+        writer = MagicMock()
+        with (patch("galaxy_transformer._init_galaxy_transformer", return_value=transformer),
+              patch("galaxy_transformer._init_sphere_reader", return_value=reader),
+              patch("galaxy_transformer._init_plate_writer", return_value=writer),
+              patch("builtins.input", return_value="y"),
+              patch("sys.stdout", new_callable=StringIO) as stdout):
+            galaxy_main(["-PDF"])
+
+        self.assertIn("星座を処理しますか。(y/N)", stdout.getvalue())
+        transformer.process_constellations.assert_called_once_with(reader, writer)
 
 
 if __name__ == "__main__":

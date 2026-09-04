@@ -209,10 +209,9 @@ def main(argv=None):
     w = _init_plate_writer(props, writer_type)
     print("ユニットを配置しています。。。")
     t.process_stars(r, w)
-    if writer_type == PlateWriterType.SVG:
-        print("星座を処理しますか。(y/N) ")
-        if input().lower() == "y":
-            t.process_constellations(r, w)
+    print("星座を処理しますか。(y/N) ")
+    if input().lower() == "y":
+        t.process_constellations(r, w)
     print("データを発行しています。")
     w.close()
     print("完了しました。(`･ω･´) ｼｬｷｰﾝ")

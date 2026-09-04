@@ -263,7 +263,7 @@ def _usage():
     print("Options:")
     print("\t-PDF\t原板データを印刷用PDF形式で出力します。")
     print("\t-f [configFile]\tプラネタリウムの設定を configFile から読み込みます。")
-    print("\t--polygons\t原盤ごとの担当星域ポリゴンをSVG出力します。")
+    print("\t--polygons\t原盤ごとの担当星域ポリゴンを原板と同じ形式で出力します。")
     print("\t-h,-help\tこのメッセージを表示します。")
 
 
@@ -275,7 +275,7 @@ def _init_transformer(props):
         scale = BasicTransformer.parse_double_with_default(input(), 1.)
         print(f"0等星の半径は何mmですか。{scale}分の一の倍率をかける前の値を指定してください。(default=0.25) ")
         radius = BasicTransformer.parse_double_with_default(input(), 0.25)
-        print("ドームの半径は何mmですか。(default=5000)")
+        print("ドームの半径は何mmですか。(default=6000)")
         sphere = BasicTransformer.parse_double_with_default(input(), 5000.)
         print("ドームの中心と投影機の中心との間の距離は何mmですか。(default=300)")
         projector = BasicTransformer.parse_double_with_default(input(), 300.)
@@ -285,13 +285,13 @@ def _init_transformer(props):
         focus = BasicTransformer.parse_double_with_default(input(), 50.)
         print("ユニットを正十二面体の面方向12箇所に配置しますか。(Y/n)")
         has_unit_12 = input().lower() != "n"
-        print("ユニットを正十二面体の頂点方向20箇所に配置しますか。(y/N)")
+        print("ユニットを正十二面体の頂点方向20箇所に配置しますか。(Y/n)")
         has_unit_20 = input().lower() == "y"
-        print("ユニットを正十二面体の辺方向30箇所に配置しますか。(Y/n)")
+        print("ユニットを正十二面体の辺方向30箇所に配置しますか。(y/N)")
         has_unit_30 = input().lower() != "n"
         print("ユニットを正十二面体の対称性をもつ最適な方向60箇所に配置しますか。(y/N)")
         has_unit_60 = input().lower() == "y"
-        print("加えて、ユニットを赤道付近に配置しますか。(Y/n)")
+        print("加えて、ユニットを赤道付近に配置しますか。(y/N)")
         has_unit_extra = input().lower() != "n"
         ar = StandardUnitArrangement(has_unit_12, has_unit_20, has_unit_30, has_unit_60, has_unit_extra)
     else:  # non-interactive mode
@@ -337,7 +337,7 @@ def _init_sphere_reader(props):
     """設定を読み込み、SphereReader のインスタンスを作成します。"""
     excluding_stars = None
     if props is None:  # interactive mode
-        print("最輝星より明るい星を、最輝星で疑似的に表現しますか。(Y/n) ")
+        print("最輝星より明るい星を、最輝星で疑似的に表現しますか。(y/N) ")
         above_maximum = input().lower() != "n"
         print("最輝星は何等星ですか。(default=1.5) ")
         maximum = BasicTransformer.parse_double_with_default(input(), 1.5)
@@ -418,12 +418,20 @@ def _init_enlarge_rate(props):
 
 
 def _write_assignment_polygons(transformer, plate_writer, props, force=False):
-    """設定に応じて全原盤の担当星域ポリゴンをSVG出力します。"""
+    """設定に応じて全原盤の担当星域ポリゴンを出力します。"""
+    if isinstance(plate_writer, PlateWriterPDF):
+        polygon_writer_class = PlateWriterPDF
+        output_category = "polygon_pdf"
+        output_format = "PDF"
+    else:
+        polygon_writer_class = PlateWriterSVG
+        output_category = "polygon_SVG"
+        output_format = "SVG"
     if props is None:
         if force:
             enabled = True
         else:
-            print("原盤ごとの担当星域ポリゴンをSVG出力しますか。(y/N) ")
+            print(f"原盤ごとの担当星域ポリゴンを{output_format}出力しますか。(y/N) ")
             enabled = input().lower() == "y"
         samples = 180
         filename_prefix = "polygon-"
@@ -440,14 +448,14 @@ def _write_assignment_polygons(transformer, plate_writer, props, force=False):
 
     print(f"担当星域ポリゴンを計算しています（1原盤あたり{samples}頂点）。")
     generator = PlateAssignmentPolygonGenerator(transformer, samples=samples)
-    polygon_writer = PlateWriterSVG(
+    polygon_writer = polygon_writer_class(
         plate_writer.column,
         plate_writer.row,
         plate_writer.r,
         plate_writer.shape,
         filename_prefix,
         True,  # ポリゴン原盤は常に黒地に白い投影領域で出力する。
-        categorized_output_dir(_get_output_dir(props), "polygon"),
+        categorized_output_dir(_get_output_dir(props), output_category),
     )
     try:
         count = 0
@@ -456,7 +464,7 @@ def _write_assignment_polygons(transformer, plate_writer, props, force=False):
             count += 1
     finally:
         polygon_writer.close()
-    print(f"{count}枚の原盤の担当星域ポリゴンをSVG出力しました。")
+    print(f"{count}枚の原盤の担当星域ポリゴンを{output_format}出力しました。")
 
 
 def main(argv=None):
@@ -506,10 +514,9 @@ def main(argv=None):
     _write_assignment_polygons(t, w, props, force_polygons)
     print("ユニットを配置しています。。。")
     t.process_stars(r, w, enlarge_rate)
-    if writer_type == PlateWriterType.SVG:
-        print("星座を処理しますか。(y/N) ")
-        if input().lower() == "y":
-            t.process_constellations(r, w)
+    print("星座を処理しますか。(y/N) ")
+    if input().lower() == "y":
+        t.process_constellations(r, w)
     print("データを発行しています。")
     w.close()
     print("完了しました。(`･ω･´) ｼｬｷｰﾝ")

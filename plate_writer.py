@@ -126,8 +126,8 @@ class _PlateWriterBase(PlateWriter):
 class PlateWriterPDF(_PlateWriterBase):
     """191 x 277 mmの1ページPDFをベクトルで書き出します。
 
-    印刷用PDFに追加する表示は原盤番号（N0/S0など）だけとし、
-    SVGの向きマークや星座名・星座線は含めません。
+    原盤番号、星穴、選択時の星座名・星座線を出力します。
+    SVGの向きマークは含めません。
     """
 
     def __init__(self, column, row, r, shape, filename_prefix, invert_color,
@@ -216,7 +216,54 @@ class PlateWriterPDF(_PlateWriterBase):
     def write_constellation(self, c):
         if self.outs is None:
             raise IOError("writer is closed")
-        # 印刷用PDFには原盤番号以外の注記・星座線を入れない。
+        color = 1 if self.invert_color else 0
+        if c.name is not None and c.p is not None:
+            self._write_frame(c.p.index)
+            out = self.outs[c.p.index // (self.column * self.row)]
+            cx = self._get_cx(c.p.index)
+            cy = self._get_cy(c.p.dir, c.p.index)
+            out.setFillGray(color)
+            out.setFont("Helvetica", self._x(3))
+            out.drawCentredString(
+                self._x(cx + c.p.xmm),
+                self._y(cy + c.p.ymm),
+                c.name,
+            )
+        if c.ll is not None:
+            for line in c.ll:
+                self._write_frame(line[0].index)
+                out = self.outs[line[0].index // (self.column * self.row)]
+                cx = self._get_cx(line[0].index)
+                cy = self._get_cy(line[0].dir, line[0].index)
+                out.setStrokeGray(color)
+                out.setLineWidth(self._x(0.1))
+                out.line(
+                    self._x(cx + line[0].xmm),
+                    self._y(cy + line[0].ymm),
+                    self._x(cx + line[1].xmm),
+                    self._y(cy + line[1].ymm),
+                )
+
+    def write_assignment_polygon(self, dir_, index, points):
+        """指定原盤の担当星域をベクトルポリゴンとして書き出します。"""
+        if self.outs is None:
+            raise IOError("writer is closed")
+        if not points:
+            return
+        self._write_frame(index)
+        out = self.outs[index // (self.column * self.row)]
+        cx = self._get_cx(index)
+        cy = self._get_cy(dir_, index)
+        path = out.beginPath()
+        first_x, first_y = points[0]
+        path.moveTo(self._x(cx + first_x), self._y(cy + first_y))
+        for x, y in points[1:]:
+            path.lineTo(self._x(cx + x), self._y(cy + y))
+        path.close()
+        out.setFillGray(1)
+        out.setStrokeGray(1)
+        out.setLineWidth(self._x(0.1))
+        out.drawPath(path, stroke=1, fill=1)
 
     def close(self):
         if self.outs is None:
