@@ -17,9 +17,11 @@ from sphere_reader import SphereReader
 from transformer import (
     _PlateWriterGroup,
     Transformer,
+    _init_enlarge_constellation_names,
     _init_enlarge_rate,
     _init_plate_writer,
     _select_interactive_output_types,
+    _parse_constellation_names,
     _write_assignment_polygons,
 )
 from unit_arrangement import CustomUnitArrangement
@@ -56,6 +58,16 @@ class _StarReader:
         return self.constellation_ids
 
 
+class _NamedStarReader(_StarReader):
+    def __init__(self, stars, constellation_ids):
+        super().__init__(stars, constellation_ids)
+        self.requested_names = None
+
+    def constellation_star_hip_numbers(self, constellation_names=None):
+        self.requested_names = constellation_names
+        return self.constellation_ids
+
+
 class _StarWriter:
     def __init__(self):
         self.stars = []
@@ -78,6 +90,33 @@ class ConstellationStarTests(unittest.TestCase):
         self.assertEqual(893, len(hip_numbers))
         self.assertIn(677, hip_numbers)
         self.assertIn(2072, hip_numbers)  # 補助CSVだけに存在
+
+    def test_constellation_names_are_loaded_from_hlc(self):
+        names = SphereReader.constellation_names()
+        self.assertEqual(89, len(names))
+        self.assertEqual("Andromeda", names[0])
+        self.assertIn("Serpens (Head)", names)
+
+    def test_only_selected_constellation_hip_numbers_are_returned(self):
+        hip_numbers = SphereReader.constellation_star_hip_numbers(
+            ["Andromeda"]
+        )
+        self.assertIn(677, hip_numbers)
+        self.assertIn(7607, hip_numbers)
+        self.assertNotIn(53502, hip_numbers)  # Antlia
+        self.assertNotIn(2072, hip_numbers)  # 星座名のない補助CSVの星
+
+    def test_multiple_selected_constellations_are_combined(self):
+        andromeda = SphereReader.constellation_star_hip_numbers(["Andromeda"])
+        antlia = SphereReader.constellation_star_hip_numbers(["Antlia"])
+        combined = SphereReader.constellation_star_hip_numbers(
+            ["Andromeda", "Antlia", "Andromeda"]
+        )
+        self.assertEqual(andromeda | antlia, combined)
+
+    def test_unknown_constellation_name_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "Unknown"):
+            SphereReader.constellation_star_hip_numbers(["Unknown"])
 
     def test_enlarge_formula_matches_fourth_magnitude_rule(self):
         base_radius = 0.25
@@ -139,6 +178,44 @@ class ConstellationStarTests(unittest.TestCase):
             0.25 * math.pow(math.sqrt(2.512), -4) * math.pow(10.0, 0.2),
             writer.stars[1].rmm,
         )
+
+    def test_selected_constellation_names_are_passed_to_reader(self):
+        transformer = _IdentityTransformer()
+        writer = _StarWriter()
+        reader = _NamedStarReader([_star(10), _star(20)], {20})
+        transformer.process_stars(
+            reader,
+            writer,
+            enlarge_rate=1.0,
+            constellation_names=("Orion",),
+        )
+        self.assertEqual(("Orion",), reader.requested_names)
+        self.assertAlmostEqual(
+            0.25 * math.pow(math.sqrt(2.512), -4) * math.pow(10.0, 0.2),
+            writer.stars[1].rmm,
+        )
+
+    def test_constellation_name_list_accepts_commas_newlines_and_comments(self):
+        self.assertEqual(
+            ("Orion", "Canis Major", "Ursa Major"),
+            _parse_constellation_names(
+                "# selected constellations\nOrion, Canis Major\n\nUrsa Major\n"
+            ),
+        )
+
+    def test_constellation_names_are_loaded_from_properties(self):
+        names = _init_enlarge_constellation_names(
+            {"star.enlarge-constellations": "Orion, Canis Major"}
+        )
+        self.assertEqual(("Orion", "Canis Major"), names)
+
+    def test_constellation_names_are_loaded_from_interactive_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "constellations.txt"
+            path.write_text("Orion\nCanis Major\n", encoding="utf-8")
+            with patch("builtins.input", return_value=str(path)):
+                names = _init_enlarge_constellation_names(None)
+        self.assertEqual(("Orion", "Canis Major"), names)
 
     def test_legacy_enlarge_property_name_is_supported(self):
         self.assertEqual(1.5, _init_enlarge_rate({"star-EnlargeRate": "1.5"}))
