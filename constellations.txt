@@ -1,6 +1,15 @@
+Cepheus
+Cassiopeia
+Andromeda
+Cetus
+Perseus
+Pegasus
+Lyra
+Cygnus
+Aquila
 Orion
 Taurus
-Gemini
-Canis Major
-Canis Minor
 Auriga
+Canis Minor
+Canis Major
+Gemini
