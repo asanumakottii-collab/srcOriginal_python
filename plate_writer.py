@@ -77,8 +77,8 @@ class PlateWriter(ABC):
 class _PlateWriterBase(PlateWriter):
     """PlateWriterPDF と PlateWriterSVG に共通するレイアウト計算。"""
 
-    WIDTH = 191.  # 出力用紙の幅
-    HEIGHT = 277. / 2.  # 出力用紙の高さ
+    WIDTH = 210.  # ISO A4用紙の幅
+    HEIGHT = 297. / 2.  # ISO A4用紙の高さの半分（北天・南天を上下に配置）
 
     def __init__(self, column, row, r, shape, filename_prefix, invert_color, output_dir=DEFAULT_OUTPUT_DIR):
         if column <= 0:
@@ -124,7 +124,7 @@ class _PlateWriterBase(PlateWriter):
 
 
 class PlateWriterPDF(_PlateWriterBase):
-    """191 x 277 mmの1ページPDFをベクトルで書き出します。
+    """ISO A4（210 x 297 mm）の1ページPDFをベクトルで書き出します。
 
     原盤番号、星穴、選択時の星座名・星座線を出力します。
     SVGの向きマークは含めません。

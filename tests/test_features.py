@@ -205,9 +205,11 @@ class AssignmentPolygonTests(unittest.TestCase):
             polygons = root.findall("{http://www.w3.org/2000/svg}polygon")
             self.assertEqual("N0", polygons[0].attrib["data-plate"])
             self.assertEqual("white", polygons[0].attrib["fill"])
+            self.assertEqual("210.0mm", root.attrib["width"])
+            self.assertEqual("297.0mm", root.attrib["height"])
             first_x, first_y = map(float, polygons[0].attrib["points"].split()[0].split(","))
-            self.assertAlmostEqual(95.5 * 96 / 25.4, first_x)
-            self.assertAlmostEqual(69.25 * 96 / 25.4, first_y)
+            self.assertAlmostEqual(105 * 96 / 25.4, first_x)
+            self.assertAlmostEqual(74.25 * 96 / 25.4, first_y)
 
     def test_polygon_generation_uses_svg_output_category(self):
         with tempfile.TemporaryDirectory() as directory, patch(
@@ -284,8 +286,8 @@ class PlateFrameBoundaryTests(unittest.TestCase):
                 if "stroke" not in element.attrib
             ]
             self.assertEqual(1, len(star_holes))
-            self.assertEqual("119.5mm", star_holes[0].attrib["cx"])
-            self.assertEqual("101.25mm", star_holes[0].attrib["cy"])
+            self.assertEqual("129.0mm", star_holes[0].attrib["cx"])
+            self.assertEqual("106.25mm", star_holes[0].attrib["cy"])
 
     def test_rectangular_writer_keeps_square_corner(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -385,8 +387,8 @@ class PDFWriterTests(unittest.TestCase):
             self.assertEqual(1, len(reader.pages))
             page = reader.pages[0]
             point_to_mm = 25.4 / 72
-            self.assertAlmostEqual(191, float(page.mediabox.width) * point_to_mm, places=3)
-            self.assertAlmostEqual(277, float(page.mediabox.height) * point_to_mm, places=3)
+            self.assertAlmostEqual(210, float(page.mediabox.width) * point_to_mm, places=3)
+            self.assertAlmostEqual(297, float(page.mediabox.height) * point_to_mm, places=3)
             self.assertEqual(["N0", "S0", "Orion"], page.extract_text().split())
             self.assertEqual([], list(page.images))
             self.assertIn(b"l", [operator for _, operator in page.get_contents().operations])
