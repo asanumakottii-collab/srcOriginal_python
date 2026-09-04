@@ -484,15 +484,15 @@ def _init_enlarge_rate(props):
     """星座線を構成する星の拡大率を読み込みます。"""
     if props is None:
         print("星座線を構成する星の拡大率は幾つですか。"
-              "(1大きくなるごとに4等星相当の星が1等級明るくなります。default=0.0)")
+              "(0以上2以下。1大きくなるごとに4等星相当の星が1等級明るくなります。default=0.0)")
         enlarge_rate = BasicTransformer.parse_double_with_default(input(), 0.0)
     else:
         # Java版のキーを維持しつつ、Python版向けの表記も受け付ける。
         value = props.get("star.enlarge-rate", props.get("star-EnlargeRate"))
         enlarge_rate = BasicTransformer.parse_double_with_default(value, 0.0)
         print(f"\t星座線を構成する星の拡大率は {enlarge_rate} です。")
-    if enlarge_rate < 0:
-        raise ValueError("星座線構成星の拡大率には0以上の値を指定してください。")
+    if not 0.0 <= enlarge_rate <= BasicTransformer.MAX_CONSTELLATION_ENLARGE_RATE:
+        raise ValueError("星座線構成星の拡大率には0以上2以下の値を指定してください。")
     return enlarge_rate
 
 
