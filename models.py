@@ -25,6 +25,15 @@ import math
 from mathvector import MathVector
 
 
+# Hipparcos/ICRSから銀河座標への回転行列（各行は銀河座標軸）。
+# 参照: https://github.com/liberfa/erfa/blob/master/src/icrs2g.c
+_GALACTIC_AXES = (
+    MathVector(-0.05487556041621537, -0.8734370902348850, -0.4838350155487132),
+    MathVector(0.4941094278755837, -0.4448296299600112, 0.7469822444972189),
+    MathVector(-0.8676661490190047, -0.1980763734312015, 0.4559837761750669),
+)
+
+
 class PlatePosition:
     """原板上での位置を扱うクラスです。"""
 
@@ -66,6 +75,23 @@ class SpherePosition:
     def to_vector(self, radius):
         """直交座標に変換します。"""
         return MathVector.from_mag_lng_lat(radius, math.radians(self.radeg), math.radians(self.dedeg))
+
+    def to_galactic(self):
+        """ICRS赤道座標から ``(銀経[0, 360), 銀緯)`` を度で返します。"""
+        vector = self.to_vector(1.).transform(_GALACTIC_AXES)
+        longitude = math.degrees(vector.get_lng()) % 360.
+        return longitude, math.degrees(vector.get_lat())
+
+    @staticmethod
+    def from_galactic(longitude, latitude):
+        """度単位の銀経・銀緯からICRS赤道座標を作成します。"""
+        vector = MathVector.from_mag_lng_lat(
+            1., math.radians(longitude), math.radians(latitude)
+        )
+        equatorial = (_GALACTIC_AXES[0].mult_scalar(vector.x)
+                      .plus(_GALACTIC_AXES[1].mult_scalar(vector.y))
+                      .plus(_GALACTIC_AXES[2].mult_scalar(vector.z)))
+        return SpherePosition.from_vector(equatorial)
 
     @staticmethod
     def from_vector(vector):

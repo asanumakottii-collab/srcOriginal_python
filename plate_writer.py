@@ -108,6 +108,13 @@ class _PlateWriterBase(PlateWriter):
     def _output_path(self, extension):
         return resolve_output_path(self.output_dir, f"{self.filename_prefix}{self.number_of_page}.{extension}")
 
+    def write_frames(self, number_of_units):
+        """上下それぞれに指定個数の原盤枠を、星がない場合も出力します。"""
+        if self.outs is None:
+            raise IOError("writer is closed")
+        if number_of_units > 0:
+            self._write_frame(number_of_units - 1)
+
     def _is_position_in_frame(self, x, y):
         """原盤上の中心座標が、実際に描画する枠の内側かを返します。"""
         if not math.isfinite(x) or not math.isfinite(y):
