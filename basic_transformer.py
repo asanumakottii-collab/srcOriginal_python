@@ -2,6 +2,7 @@
 #
 # Orb Transform Library(OTL)
 # Copyright (C) 2007,2012-2014 東京大学地文研究会天文部
+# Copyright (C) 2026 東京大学地文研究会天文部
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -160,8 +161,9 @@ class BasicTransformer(ABC):
 
     @staticmethod
     def print_version_and_license():
-        print("Orb Transform Library(OTL) Version 1.4")
+        print("Orb Transform Library(OTL) Python版 Version 1.5")
         print("Copyright (C) 2007,2012-2014 東京大学地文研究会天文部")
+        print("Copyright (C) 2026 東京大学地文研究会天文部")
         print("")
         print("This program is free software; you can redistribute it and/or modify it under "
               "the terms of the GNU General Public License as published by the Free Software "

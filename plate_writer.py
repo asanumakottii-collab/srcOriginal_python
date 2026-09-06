@@ -2,6 +2,7 @@
 #
 # Orb Transform Library(OTL)
 # Copyright (C) 2007,2012,2014 東京大学地文研究会天文部
+# Copyright (C) 2026 東京大学地文研究会天文部
 #
 # This program is free software; you can redistribute it and/or
 # modify it under the terms of the GNU General Public License
@@ -127,7 +128,7 @@ class PlateWriterPDF(_PlateWriterBase):
     """ISO A4（210 x 297 mm）の1ページPDFをベクトルで書き出します。
 
     原盤番号、星穴、選択時の星座名・星座線を出力します。
-    SVGの向きマークは含めません。
+    円形原盤の左上にはSVGと同じ向きマークを出力します。
     """
 
     def __init__(self, column, row, r, shape, filename_prefix, invert_color,
@@ -182,6 +183,14 @@ class PlateWriterPDF(_PlateWriterBase):
                         self._x(cx), self._y(cy), self._x(self.r),
                         stroke=0 if self.invert_color else 1,
                         fill=1 if self.invert_color else 0,
+                    )
+                    out.line(
+                        self._x(cx - self.r * 3. / 4.), self._y(cy - self.r * 3. / 4.),
+                        self._x(cx - self.r), self._y(cy - self.r),
+                    )
+                    out.line(
+                        self._x(cx - self.r * 3. / 4.), self._y(cy - self.r),
+                        self._x(cx - self.r), self._y(cy - self.r * 3. / 4.),
                     )
                 else:
                     x, y = cx - self.r, cy - self.r
