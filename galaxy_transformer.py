@@ -25,7 +25,8 @@ import sys
 
 from basic_transformer import BasicTransformer
 from config import load_properties
-from models import PlatePosition
+from mathvector import MathVector
+from models import PlateConstellation, PlatePosition, SpherePosition
 from plate_writer import (
     DEFAULT_OUTPUT_DIR,
     PlateWriterPDF,
@@ -43,6 +44,11 @@ def _get_output_dir(props):
 
 
 class GalaxyTransformer(BasicTransformer):
+    # (N0, N1, S0, S1) の順。N/Sは出力用紙上の位置を表し、銀緯の正負ではない。
+    LONGITUDE_REGIONS = ((0., 60.), (60., 120.), (300., 360.), (180., 240.))
+    LATITUDE_LIMIT = 20.
+    _ANGLE_EPS = 1e-10  # 度。座標回転の丸め誤差を吸収する。
+
     def __init__(self, radius, sphere, projector_horizontal, projector_vertical, plate):
         """
         座標変換のパラメータを設定します。
@@ -60,43 +66,112 @@ class GalaxyTransformer(BasicTransformer):
         self.plate = plate
         self.base_magnitude = 7.5
 
+        # 投影機の位置は従来どおり赤道座標の(0, ±水平距離, ±垂直距離)。
+        # 各担当領域の銀経中央・銀緯0度への光線を原盤中心に合わせる。
+        galactic_north = SpherePosition.from_galactic(0., 90.).to_vector(1.)
+        self._plate_geometry = {}
+        for region, (start, end) in enumerate(self.LONGITUDE_REGIONS):
+            dir_, index = divmod(region, 2)
+            projector = MathVector(
+                0., projector_horizontal * (1 if index == 0 else -1),
+                projector_vertical * (1 if dir_ == 0 else -1),
+            )
+            center = SpherePosition.from_galactic((start + end) / 2., 0.)
+            forward = center.to_vector(sphere).minus(projector).unit_vector()
+            east = galactic_north.cross(forward).unit_vector()
+            north = forward.cross(east).unit_vector()
+            self._plate_geometry[dir_, index] = (projector, forward, east, north)
+
+    @classmethod
+    def _normalize_longitude(cls, longitude):
+        longitude %= 360.
+        for boundary in (0., 60., 120., 180., 240., 300., 360.):
+            if abs(longitude - boundary) <= cls._ANGLE_EPS:
+                return boundary % 360.
+        return longitude
+
+    def assigned_unit(self, sp):
+        """銀緯±20度の担当 ``(出力位置, 番号)`` を返す。対象外はNone。"""
+        longitude, latitude = sp.to_galactic()
+        if not abs(latitude) <= self.LATITUDE_LIMIT + self._ANGLE_EPS:
+            return None
+        longitude = self._normalize_longitude(longitude)
+        for region, (start, end) in enumerate(self.LONGITUDE_REGIONS):
+            if start <= longitude < end:
+                return divmod(region, 2)
+        return None
+
     def transform(self, sp):
-        """レンズの中心を通る光は直進する性質を利用して、天球上の位置をもっとも適切と判定されたユニットの原板上の位置に変換します。"""
-        index = 0 if 0. <= sp.radeg <= 180. else 1
-        dir_ = 0 if sp.dedeg >= 0 else 1
-        return self.transform_unit(sp, dir_, index)
+        """銀河座標で担当原盤を選び、領域外の位置は除外します。"""
+        unit = self.assigned_unit(sp)
+        if unit is None:
+            return None
+        return self.transform_unit(sp, *unit)
 
     def transform_unit(self, sp, dir_, index):
+        """担当領域の中央を基準に、従来の円筒投影で原盤座標へ変換します。"""
+        projector, forward, east, north = self._plate_geometry[dir_, index]
+        ray = sp.to_vector(self.sphere).minus(projector)
+        x, y, z = ray.dot(forward), ray.dot(east), ray.dot(north)
         pp = PlatePosition()
-        vector = sp.to_vector(self.sphere)
         pp.index = index
-        if index == 0:
-            vector.y -= self.projector_horizontal
-        else:
-            vector.y += self.projector_horizontal
         pp.dir = dir_
-        if dir_ == 0:
-            vector.z -= self.projector_vertical
-        else:
-            vector.z += self.projector_vertical
-        vector.x, vector.y, vector.z = vector.z, vector.x, vector.y
-        pp.xmm = self.plate * math.tan(vector.get_lat())
-        pp.ymm = -self.plate * vector.get_lng()
-        if dir_ == 0:
-            if index == 0:
-                pp.ymm += self.plate * math.pi / 4
-            else:
-                pp.ymm += self.plate * math.pi * 3 / 4
-        else:
-            if index == 0:
-                pp.ymm -= self.plate * math.pi / 4
-            else:
-                pp.ymm -= self.plate * math.pi * 3 / 4
-        if pp.ymm < -self.plate * math.pi:
-            pp.ymm += self.plate * math.pi * 2
-        if pp.ymm > self.plate * math.pi:
-            pp.ymm -= self.plate * math.pi * 2
+        pp.xmm = self.plate * z / math.hypot(x, y)
+        pp.ymm = -self.plate * math.atan2(y, x)
         return pp
+
+    @staticmethod
+    def _clip_line(longitude, latitude, delta_l, delta_b, start, end, limit):
+        """銀経・銀緯で線分を長方形領域へクリップし、線分上の区間を返す。"""
+        lower, upper = 0., 1.
+        for origin, delta, minimum, maximum in (
+            (longitude, delta_l, start, end),
+            (latitude, delta_b, -limit, limit),
+        ):
+            if abs(delta) <= GalaxyTransformer._ANGLE_EPS:
+                if (origin < minimum - GalaxyTransformer._ANGLE_EPS
+                        or origin > maximum + GalaxyTransformer._ANGLE_EPS):
+                    return None
+                continue
+            entry, leave = sorted(((minimum - origin) / delta, (maximum - origin) / delta))
+            lower, upper = max(lower, entry), min(upper, leave)
+            if lower >= upper:
+                return None
+        return lower, upper
+
+    def transform_constellation(self, sc):
+        """星座名を領域で選別し、星座線は銀経・銀緯の境界で分割します。"""
+        pc = PlateConstellation()
+        pc.hip_numbers = list(sc.hip_numbers)
+        if sc.name is not None and sc.p is not None:
+            pc.name, pc.p = sc.name, self.transform(sc.p)
+        pc.ll = []
+        for first, last in sc.ll or ():
+            longitude, latitude = first.to_galactic()
+            end_l, end_b = last.to_galactic()
+            longitude = self._normalize_longitude(longitude)
+            delta_l = (self._normalize_longitude(end_l) - longitude + 180.) % 360. - 180.
+            delta_b = end_b - latitude
+            for region, (start, end) in enumerate(self.LONGITUDE_REGIONS):
+                dir_, index = divmod(region, 2)
+                # 0/360度をまたぐ線分も、それぞれの原盤の境界で分割する。
+                for shift in (-360., 0., 360.):
+                    left, right = start + shift, end + shift
+                    if abs(delta_l) <= self._ANGLE_EPS and not left <= longitude < right:
+                        continue
+                    interval = self._clip_line(
+                        longitude, latitude, delta_l, delta_b,
+                        left, right, self.LATITUDE_LIMIT,
+                    )
+                    if interval is None:
+                        continue
+                    pc.ll.append([
+                        self.transform_unit(SpherePosition.from_galactic(
+                            longitude + t * delta_l, latitude + t * delta_b
+                        ), dir_, index)
+                        for t in interval
+                    ])
+        return pc if pc.p is not None or pc.ll else None
 
 
 def _usage():
@@ -137,6 +212,11 @@ def _init_galaxy_transformer(props):
         print(f"\tドームの中心から投影機中心へのベクトルの赤道面に平行な成分は {projector_horizontal} mm です。")
         print(f"\tドームの中心から投影機中心へのベクトルの赤道面に垂直な成分は {projector_vertical} mm です。")
         print(f"\t投影機の中心と原板の中心の間の距離は {plate} mm です。")
+    print(f"\t銀緯±{GalaxyTransformer.LATITUDE_LIMIT:g}度を4枚の原盤に割り当てます。")
+    for region, (start, end) in enumerate(GalaxyTransformer.LONGITUDE_REGIONS):
+        dir_, index = divmod(region, 2)
+        label = ("N" if dir_ == 0 else "S") + str(index)
+        print(f"\t{label}: 銀経{start:g}度以上{end:g}度未満")
     return GalaxyTransformer(radius, sphere * scale, projector_horizontal * scale, projector_vertical * scale, plate * scale)
 
 
@@ -159,24 +239,27 @@ def _init_plate_writer(props, writer_type):
     invert_color = True
     output_dir = categorized_output_dir(_get_output_dir(props), "galaxy")
     if props is None:  # interactive mode
-        print("横に各天のユニットをいくつ配置しますか。(default=1) ")
+        print("横に各段の原盤をいくつ配置しますか。(default=1) ")
         column = BasicTransformer.parse_int_with_default(input(), 1)
-        print("縦に各天のユニットをいくつ配置しますか。(default=1) ")
+        print("縦に各段の原盤をいくつ配置しますか。(default=1) ")
         row = BasicTransformer.parse_int_with_default(input(), 1)
     else:  # non-interactive mode
         column = BasicTransformer.parse_int_with_default(props.get("plate.column"), 1)
         row = BasicTransformer.parse_int_with_default(props.get("plate.row"), 1)
         filename_prefix = props.get("galaxy.file.prefix", filename_prefix)
         invert_color = BasicTransformer.parse_boolean_with_default(props.get("color.invert", ""), False)
-        print(f"\t横に各天のユニットを {column} 個配置します。")
-        print(f"\t縦に各天のユニットを {row} 個配置します。")
+        print(f"\t横に各段の原盤を {column} 個配置します。")
+        print(f"\t縦に各段の原盤を {row} 個配置します。")
         print(f"\t出力フォルダは {output_dir} です。")
         print("\t原板を" + ("黒色" if invert_color else "白色") + "、星を" + ("白色" if invert_color else "黒色") + "で書き出します。")
     if writer_type == PlateWriterType.SVG:
-        return PlateWriterSVG(column, row, 0., False, filename_prefix, invert_color, output_dir)
-    if writer_type == PlateWriterType.PDF:
-        return PlateWriterPDF(column, row, 0., False, filename_prefix, invert_color, output_dir)
-    return None
+        writer = PlateWriterSVG(column, row, 0., False, filename_prefix, invert_color, output_dir)
+    elif writer_type == PlateWriterType.PDF:
+        writer = PlateWriterPDF(column, row, 0., False, filename_prefix, invert_color, output_dir)
+    else:
+        return None
+    writer.write_frames(2)
+    return writer
 
 
 def main(argv=None):
