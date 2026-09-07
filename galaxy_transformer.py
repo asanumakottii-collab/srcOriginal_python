@@ -48,7 +48,7 @@ def _get_output_dir(props):
 
 class GalaxyTransformer(BasicTransformer):
     # (N0, N1, S0, S1) の順。N/Sは出力用紙上の位置を表し、銀緯の正負ではない。
-    LONGITUDE_REGIONS = ((0., 60.), (60., 120.), (300., 360.), (180., 240.))
+    LONGITUDE_REGIONS = ((0., 60.), (60., 120.), (300., 360.), (240., 300.))
     LATITUDE_LIMIT = 20.
     _ANGLE_EPS = 1e-10  # 度。座標回転の丸め誤差を吸収する。
 

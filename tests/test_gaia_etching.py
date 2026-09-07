@@ -28,7 +28,7 @@ class EtchingTests(unittest.TestCase):
     def test_inverse_projection_with_offset(self):
         for horizontal, vertical in ((0., 0.), (355., 200.)):
             transformer = GalaxyTransformer(.1, 6500., horizontal, vertical, 50.)
-            for lon in (0., 30., 59.9, 60., 119., 180., 210., 300., 330., 359.9):
+            for lon in (0., 30., 59.9, 60., 119., 240., 270., 300., 330., 359.9):
                 for lat in (-20., 0., 20.):
                     sp = position(lon, lat)
                     pp = transformer.transform(sp)
@@ -111,7 +111,7 @@ class EtchingTests(unittest.TestCase):
 
     def test_four_units_do_not_share_rounding_or_flux(self):
         builder = EtchingBuilder(self.t, self.settings, 69.25)
-        for lon in (30.01, 90.01, 210.01, 330.01):
+        for lon in (30.01, 90.01, 270.01, 330.01):
             builder.add_sample(position(lon, .01), .006, 1)
         holes, report = builder.build()
         self.assertEqual(4, len(holes))

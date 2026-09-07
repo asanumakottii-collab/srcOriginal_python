@@ -52,7 +52,7 @@ class GalaxyTransformerTests(unittest.TestCase):
 
     def test_each_region_contains_both_galactic_latitude_signs(self):
         for longitude, unit in ((30., (0, 0)), (90., (0, 1)),
-                                (330., (1, 0)), (210., (1, 1))):
+                                (330., (1, 0)), (270., (1, 1))):
             for latitude in (-19., 0., 19.):
                 with self.subTest(longitude=longitude, latitude=latitude):
                     position = _position(longitude, latitude)
@@ -66,16 +66,16 @@ class GalaxyTransformerTests(unittest.TestCase):
         for longitude, unit in (
             (0., (0, 0)), (60. - 1e-6, (0, 0)), (60., (0, 1)),
             (120. - 1e-6, (0, 1)), (120., None), (150., None),
-            (180. - 1e-6, None), (180., (1, 1)),
-            (240. - 1e-6, (1, 1)), (240., None), (270., None),
-            (300. - 1e-6, None), (300., (1, 0)), (300. + 1e-6, (1, 0)),
+            (180. - 1e-6, None), (180., None),
+            (240. - 1e-6, None), (240., (1, 1)), (270., (1, 1)),
+            (300. - 1e-6, (1, 1)), (300., (1, 0)), (300. + 1e-6, (1, 0)),
             (360. - 1e-6, (1, 0)), (360., (0, 0)), (-60., (1, 0)),
         ):
             with self.subTest(longitude=longitude):
                 self.assertEqual(unit, self.transformer.assigned_unit(_position(longitude)))
 
     def test_latitude_limits_are_inclusive_and_outside_is_excluded(self):
-        for longitude in (30., 90., 210., 300.):
+        for longitude in (30., 90., 270., 300.):
             for latitude in (-20., 20.):
                 with self.subTest(longitude=longitude, latitude=latitude):
                     self.assertIsNotNone(self.transformer.transform(_position(longitude, latitude)))
@@ -84,7 +84,7 @@ class GalaxyTransformerTests(unittest.TestCase):
                     self.assertIsNone(self.transformer.transform(_position(longitude, latitude)))
 
     def test_each_region_center_projects_to_plate_center_with_projector_offset(self):
-        for longitude in (30., 90., 330., 210.):
+        for longitude in (30., 90., 330., 270.):
             with self.subTest(longitude=longitude):
                 position = self.transformer.transform(_position(longitude))
                 self.assertAlmostEqual(0., position.xmm, places=10)
@@ -92,7 +92,7 @@ class GalaxyTransformerTests(unittest.TestCase):
 
     def test_cylindrical_projection_scale_and_direction(self):
         transformer = GalaxyTransformer(0.125, 6500., 0., 0., 50.)
-        for center in (30., 90., 330., 210.):
+        for center in (30., 90., 330., 270.):
             for delta_l, latitude in ((-10., -15.), (10., 15.)):
                 with self.subTest(center=center, delta_l=delta_l):
                     position = transformer.transform(_position(center + delta_l, latitude))
@@ -112,7 +112,7 @@ class GalaxyTransformerTests(unittest.TestCase):
 
     def test_process_stars_skips_outside_band_and_longitude_gaps(self):
         stars = []
-        for longitude, latitude in ((30., 0.), (30., 21.), (150., 0.), (270., 0.), (300., -10.)):
+        for longitude, latitude in ((30., 0.), (30., 21.), (150., 0.), (210., 0.), (300., -10.)):
             star = SphereStar()
             star.p, star.vmag = _position(longitude, latitude), 7.5
             stars.append(star)
@@ -150,8 +150,8 @@ class GalaxyTransformerTests(unittest.TestCase):
 
     def test_constellation_line_crossing_longitude_gaps_is_clipped(self):
         for first, last, expected in (
-            (110., 190., ((110., 120., (0, 1)), (180., 190., (1, 1)))),
-            (230., 310., ((300., 310., (1, 0)), (230., 240., (1, 1)))),
+            (110., 250., ((110., 120., (0, 1)), (240., 250., (1, 1)))),
+            (230., 310., ((300., 310., (1, 0)), (240., 300., (1, 1)))),
         ):
             with self.subTest(first=first, last=last):
                 result = self.transformer.transform_constellation(_constellation((first, 0.), (last, 0.)))
@@ -209,8 +209,8 @@ class GalaxyOutputTests(unittest.TestCase):
 
     def test_command_filters_catalog_and_clips_constellations(self):
         stars = []
-        for longitude, latitude in ((30., 0.), (90., 0.), (300., 0.), (210., 0.),
-                                    (150., 0.), (270., 0.), (30., 21.)):
+        for longitude, latitude in ((30., 0.), (90., 0.), (300., 0.), (270., 0.),
+                                    (150., 0.), (210., 0.), (30., 21.)):
             star = SphereStar()
             star.p, star.vmag = _position(longitude, latitude), 7.5
             stars.append(star)

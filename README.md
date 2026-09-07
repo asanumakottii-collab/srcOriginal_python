@@ -141,15 +141,15 @@ SVG / PDF ともに、円形原盤の左上の枠外に黒い×印（線幅 0.1 
 | N0 | 0度以上60度未満 | 30度 |
 | N1 | 60度以上120度未満 | 90度 |
 | S0 | 300度以上360度未満 | 330度 |
-| S1 | 180度以上240度未満 | 210度 |
+| S1 | 240度以上300度未満 | 270度 |
 
-銀経120度以上180度未満、240度以上300度未満、および銀緯±20度の外は出力対象外です。N/Sは用紙の上段/下段の識別子で、赤緯・銀緯の正負を意味しません。`plate.column = 1`、`plate.row = 1` の標準設定では、`galaxy-0.svg` にN0/S0、`galaxy-1.svg` にN1/S1を配置し、計4枚の原盤を2用紙に出力します。PDFも同じ配置です。星がない領域も枠を出力します。
+銀経120度以上240度未満、および銀緯±20度の外は出力対象外です。N/Sは用紙の上段/下段の識別子で、赤緯・銀緯の正負を意味しません。`plate.column = 1`、`plate.row = 1` の標準設定では、`galaxy-0.svg` にN0/S0、`galaxy-1.svg` にN1/S1を配置し、計4枚の原盤を2用紙に出力します。PDFも同じ配置です。星がない領域も枠を出力します。
 
 各原盤では中心銀経・銀緯0度への光線を原盤中央に合わせ、円筒投影で位置を求めます。`projector-horizontal` と `projector-vertical` は従来どおり赤道座標での距離で、投影機位置は `(0, ±projector-horizontal, ±projector-vertical)` です。横成分の符号は原盤番号0で正、1で負、縦成分はNで正、Sで負です。星座名は領域内だけを出力し、星座線は銀経・銀緯で線形補間して各領域の境界で切り分けます。
 
 座標変換の回転行列はHipparcosのICRS定義に基づきます（[ERFAの参照実装](https://github.com/liberfa/erfa/blob/master/src/icrs2g.c)）。
 
-### Gaiaの光量をエッチング原盤へ変換
+### Gaia-DR3からぎんとう原盤を作成
 
 付属の `galaxyconfig.properties` は `galaxy.mode = gaia-etch` を使用します。
 従来のHipparcos・Tycho・RC3による出力は `galaxy.mode = legacy` で利用できます。
