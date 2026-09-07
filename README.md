@@ -14,6 +14,7 @@ OTL は、星表データをもとにプラネタリウム投影機用の原板�
 
 - 星座線を構成する恒星だけを、指定した倍率で拡大
 - 各原盤が担当する天球領域をポリゴンSVG / PDFとして自動生成
+- Gaia DR3の微光星の光量を集計し、指定の最小穴径・金属幅を満たす天の川原盤を生成
 
 ## 構成
 
@@ -21,6 +22,8 @@ OTL は、星表データをもとにプラネタリウム投影機用の原板�
 |---|---|
 | `transformer.py` | 星・星座用の原板を生成するメインスクリプト(エントリポイント) |
 | `galaxy_transformer.py` | 天の川(銀河)専用の原板を生成するスクリプト(エントリポイント) |
+| `gaia_catalog.py` | Gaia DR3の光量集計・取得・キャッシュ検証・CSV読み込み |
+| `galaxy_etching.py` | 局所光量を加工可能な円形穴へ変換し、光量誤差を集計 |
 | `basic_transformer.py` | 上記2つの変換処理に共通する抽象基底クラス |
 | `sphere_reader.py` | `hip_main.dat` / `tyc_main.dat` / `rc3.dat` / `IAU88.hlc` を読み込むリーダー |
 | `unit_arrangement.py` | 正十二面体をもとにした投影機ユニットの配置計算 |
@@ -39,7 +42,7 @@ OTL は、星表データをもとにプラネタリウム投影機用の原板�
 
 - `hip_main.dat` — Hipparcos 星表
 - `tyc_main.dat` — Tycho 星表
-- `rc3.dat` — RC3 銀河カタログ(天の川の疑似的な描画に使用)
+- `rc3.dat` — RC3 銀河カタログ(系外銀河の光を疑似星群として描画)
 - `IAU88.hlc` — IAU88 星座線カタログ
 
 ## セットアップ
@@ -76,8 +79,14 @@ python3 transformer.py -PDF -f starconfig.properties
 # 設定にかかわらず担当星域ポリゴンも生成する場合
 python3 transformer.py --polygons -f starconfig.properties
 
-# 天の川専用原板の生成
+# Gaia天の川原盤: 初回は光量マップを取得してSVGを生成
+python3 galaxy_transformer.py --download-gaia -f galaxyconfig.properties
+
+# 2回目以降は保存済みのGaiaデータで再生成（加工条件の調整など）
 python3 galaxy_transformer.py -f galaxyconfig.properties
+
+# 天の川専用原板を印刷用PDFで生成
+python3 galaxy_transformer.py -PDF -f galaxyconfig.properties
 ```
 
 `transformer.py` の対話モードでは、`star_SVG`、`star_pdf`、`polygon_SVG`、`polygon_pdf` をそれぞれ出力するか選択できます。複数の形式を同時に選択することもできます。未入力時は従来どおり `star_SVG` のみを出力します。
@@ -139,6 +148,71 @@ SVG / PDF ともに、円形原盤の左上の枠外に黒い×印（線幅 0.1 
 各原盤では中心銀経・銀緯0度への光線を原盤中央に合わせ、円筒投影で位置を求めます。`projector-horizontal` と `projector-vertical` は従来どおり赤道座標での距離で、投影機位置は `(0, ±projector-horizontal, ±projector-vertical)` です。横成分の符号は原盤番号0で正、1で負、縦成分はNで正、Sで負です。星座名は領域内だけを出力し、星座線は銀経・銀緯で線形補間して各領域の境界で切り分けます。
 
 座標変換の回転行列はHipparcosのICRS定義に基づきます（[ERFAの参照実装](https://github.com/liberfa/erfa/blob/master/src/icrs2g.c)）。
+
+### Gaiaの光量をエッチング原盤へ変換
+
+付属の `galaxyconfig.properties` は `galaxy.mode = gaia-etch` を使用します。
+従来のHipparcos・Tycho・RC3による出力は `galaxy.mode = legacy` で利用できます。
+モード指定のない古い設定ファイルと対話モードは従来方式です。
+
+Gaiaモードは **Gaia DR3のG帯の観測光量だけ**を使います。Hipparcos・Tycho・RC3を重ねず、
+V等級への変換や星間減光の除去もしません。暗黒帯の効果を残した、地球から見える恒星光を扱います。
+Gaiaの混雑領域での欠測や限界等級より暗い恒星、散光星雲の光は補完しません。
+これはG帯に基づく投影原稿で、肉眼の暗所視や写真の完全な再現ではありません。
+
+初回の `--download-gaia` はESA Gaia Archiveに非同期ADQLクエリを送り、4領域それぞれの
+`7.5 < G <= 17` の天体を銀経・銀緯0.1度のセルへ集計します。星をランダムに間引かず、
+各セルで `SUM(10**(-0.4*(G - reference_magnitude)))` と天体数を取得します。
+取得量を抑えるため個々の星をダウンロードせず、セル中心に合計光量を置いて再投影します。
+`--gaia-query` で使用する4本のクエリを通信せず確認できます。
+取得には時間がかかる場合があり、ジョブURLと状態を表示します。結果の上限超過（OVERFLOW）は拒否します。
+途中で失敗した場合、同じコマンドを再実行すると、検証済みの領域ファイルは再利用します。
+
+`galaxy.gaia.input` の既定値は設定ファイルからの相対パス `data/gaia` です。
+クエリ・等級・領域・集計幅・チェックサムを保存し、通常実行時は通信せず検証して読み込みます。
+Gaiaの等級範囲・取得ビン幅を変えた場合は `--download-gaia` で再取得してください。
+個別星のCSV/CSV.gzをこの設定に指定することもできます。列は
+`source_id,ra,dec,phot_g_mean_mag` が必須（赤経・赤緯はICRS、度）で、追加列は無視します。
+不正値・重複IDはエラーにします。個別CSVは網羅性を確認できないため、その旨をレポートに記録します。
+個別CSVの重複チェックはメモリを使用するため、大規模データでは集計キャッシュを推奨します。
+
+| 設定 | 初期値 | 意味 |
+|---|---:|---|
+| `galaxy.etch.min-hole-diameter-mm` | 0.02 | 最終原盤での最小穴直径。すべての穴にこの径を使用 |
+| `galaxy.etch.min-web-mm` | 0.02 | 穴の縁と縁の間に残す金属の最小幅 |
+| `galaxy.etch.cell-size-mm` | 0.2 | 原盤で光量を合計するセル幅。穴径＋金属幅の整数倍に切り下げ |
+| `galaxy.etch.flux-gain` | 0.05 | 全領域共通の光量倍率（穴面積の合計に掛ける）。微光星増加による飽和を抑える初期値 |
+| `galaxy.etch.seed` | 0 | セル内の穴の選択を再現する乱数種 |
+| `galaxy.gaia.bright-limit` | 7.5 | G等級の最輝側境界。この等級自体は含まない |
+| `galaxy.gaia.faint-limit` | 17 | G等級の最微側境界。この等級自体を含む |
+| `galaxy.gaia.sky-bin-deg` | 0.1 | 取得時の天球上の集計幅。0.05〜1度、60度を等分する値 |
+| `galaxy.gaia.reference-magnitude` | 7.5 | `star-radius-7.5` の穴面積に対応させるG等級 |
+
+加工寸法は未実測の仮値です。寸法は最終金属原盤でのmmで指定し、出力時は `scale` を掛けます。
+`star-radius-7.5` は従来どおり**縮小前の製図上の半径**です。`scale` を変えるときはこの半径も
+同じ倍率にしてください。SVG/PDFは「用紙に合わせる」を使わず、指定倍率で製版します。
+
+光量から必要な穴面積を計算し、原盤上のセルごとに合計します。穴の候補点は原盤全体で共通の格子上に
+置き、ピッチを穴径＋金属幅とするため、セル境界をまたいでも金属幅を確保します。
+各セルの必要穴数の小数部分は蛇行順に次のセルへ繰り越し、容量制限後の原盤全体の量子化誤差を
+最小穴0.5個分以内に抑えます。ゼロ光量セルに穴を足すことはありません。
+配置可能な穴数を超えた光は別の場所へ移さず、飽和損失として記録します。
+穴は**局所光量の標本で、明るい星も含め一対一の実際の恒星位置を表すものではありません**。
+実効的な細かさは取得ビン・原盤セル・投影光学系で制限されます。
+
+Gaiaモードは星座線を加工用原盤へ追加せず、入力待ちなしで生成します。
+`output/galaxy/gaia-etch-0.svg` と `gaia-etch-1.svg`（`-PDF`指定時はPDF）に計4原盤を出力し、
+既存の `galaxy-*.svg/pdf` は残します。接頭辞は `galaxy.gaia.file.prefix` で変更できます。
+`gaia-etch-report.json` に入力の出典・設定・天体数・穴数・目標面積・出力面積・飽和損失・量子化誤差を記録します。
+穴面積と投影光量の比例は均一照明・薄板を仮定しており、板厚、光源、エッチング精度、
+投影時のぼけによる影響は別途試作・測定してください。最小寸法を満たすことは加工成功の保証ではありません。
+
+GaiaモードのG等級境界は、恒星投影機のV等級境界と同一ではありません。
+恒星投影機と同時に使う際は、色による違いも含めて重複・明るさを確認してください。
+
+出典: [Gaia DR3](https://www.cosmos.esa.int/web/gaia/dr3)、
+[ESA Archiveのプログラムアクセス](https://www.cosmos.esa.int/web/gaia-users/archive/programmatic-access)。
+GaiaデータはESA/Gaia/DPACによります。発表等では[Gaiaの謝辞・引用案内](https://www.cosmos.esa.int/web/gaia-users/credits)に従ってください。
 
 ## 元のJava版との関係・互換性
 
