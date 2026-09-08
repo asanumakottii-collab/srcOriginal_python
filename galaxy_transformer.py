@@ -151,7 +151,7 @@ def _init_sphere_reader(props):
         minimum = BasicTransformer.parse_double_with_default(props.get("galaxy.star.minimum"), 10.)
         print(f"\t最輝星は {maximum} 等星です。")
         print(f"\t最微星は {minimum} 等星です。")
-    return SphereReader(False, maximum, minimum, True)
+    return SphereReader(False, maximum, minimum, True, rc3_enabled=True)
 
 
 def _init_plate_writer(props, writer_type):

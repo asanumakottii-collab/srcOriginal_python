@@ -1,0 +1,65 @@
+{
+  "complete": true,
+  "selection": {
+    "format_version": 1,
+    "catalogue": "gaiadr3.gaia_source",
+    "band": "G",
+    "bright_exclusive": 7.5,
+    "faint_inclusive": 17.0,
+    "reference_magnitude": 7.5,
+    "sky_bin_deg": 0.1,
+    "longitude_regions": [
+      [
+        0.0,
+        60.0
+      ],
+      [
+        60.0,
+        120.0
+      ],
+      [
+        300.0,
+        360.0
+      ],
+      [
+        240.0,
+        300.0
+      ]
+    ],
+    "latitude_limit": 20.0
+  },
+  "files": [
+    {
+      "name": "region-0.csv.gz",
+      "query": "SELECT FLOOR(l / 0.1) AS lon_bin, FLOOR((b + 90.0) / 0.1) AS lat_bin, COUNT(*) AS source_count,\nSUM(POWER(10.0, -0.4 * (phot_g_mean_mag - 7.5))) AS relative_flux\nFROM gaiadr3.gaia_source\nWHERE l >= 0 AND l < 60\nAND b >= -20 AND b <= 20\nAND phot_g_mean_mag > 7.5 AND phot_g_mean_mag <= 17\nGROUP BY lon_bin, lat_bin",
+      "job": "https://gea.esac.esa.int/tap-server/tap/async/ced25187-aa8c-11f1-b67b-bc97e148b76b-O",
+      "rows": 239988,
+      "stars": 32718768,
+      "sha256": "6382ad83c83e176071995c52f63d4d0885c43a3e94ebc704eceb07b9a2d177a0"
+    },
+    {
+      "name": "region-1.csv.gz",
+      "query": "SELECT FLOOR(l / 0.1) AS lon_bin, FLOOR((b + 90.0) / 0.1) AS lat_bin, COUNT(*) AS source_count,\nSUM(POWER(10.0, -0.4 * (phot_g_mean_mag - 7.5))) AS relative_flux\nFROM gaiadr3.gaia_source\nWHERE l >= 60 AND l < 120\nAND b >= -20 AND b <= 20\nAND phot_g_mean_mag > 7.5 AND phot_g_mean_mag <= 17\nGROUP BY lon_bin, lat_bin",
+      "job": "https://gea.esac.esa.int/tap-server/tap/async/f30067a0-aa8c-11f1-b67b-bc97e148b76b-O",
+      "rows": 240000,
+      "stars": 16864472,
+      "sha256": "6181c32e1f0d2a1fcc26e24fe155f7cdf518d8a47a6b5aa6e35c684d6754e442"
+    },
+    {
+      "name": "region-2.csv.gz",
+      "query": "SELECT FLOOR(l / 0.1) AS lon_bin, FLOOR((b + 90.0) / 0.1) AS lat_bin, COUNT(*) AS source_count,\nSUM(POWER(10.0, -0.4 * (phot_g_mean_mag - 7.5))) AS relative_flux\nFROM gaiadr3.gaia_source\nWHERE l >= 300 AND l < 360\nAND b >= -20 AND b <= 20\nAND phot_g_mean_mag > 7.5 AND phot_g_mean_mag <= 17\nGROUP BY lon_bin, lat_bin",
+      "job": "https://gea.esac.esa.int/tap-server/tap/async/15bff9b6-aa8d-11f1-b67b-bc97e148b76b-O",
+      "rows": 239956,
+      "stars": 35197277,
+      "sha256": "3a341a0a339ec6f39bd111d5a4825f1fb3e9eee75b9dd1a6baedc8aa1a1b733b"
+    },
+    {
+      "name": "region-3.csv.gz",
+      "query": "SELECT FLOOR(l / 0.1) AS lon_bin, FLOOR((b + 90.0) / 0.1) AS lat_bin, COUNT(*) AS source_count,\nSUM(POWER(10.0, -0.4 * (phot_g_mean_mag - 7.5))) AS relative_flux\nFROM gaiadr3.gaia_source\nWHERE l >= 240 AND l < 300\nAND b >= -20 AND b <= 20\nAND phot_g_mean_mag > 7.5 AND phot_g_mean_mag <= 17\nGROUP BY lon_bin, lat_bin",
+      "job": "https://gea.esac.esa.int/tap-server/tap/async/87361dcc-aaee-11f1-b67b-bc97e148b76b-O",
+      "rows": 239996,
+      "stars": 19236953,
+      "sha256": "e3b8676c54d89807c8e59f1def4f1a6341e280618a7276b7c934e47a4024eb84"
+    }
+  ]
+}

@@ -27,6 +27,7 @@ import math
 import os
 import random
 
+from galaxy_profile import exponential_scale_arcsec
 from mathvector import MathVector
 from models import SphereConstellation, SpherePosition, SphereStar
 
@@ -62,7 +63,7 @@ def _readline(f):
 
 
 class SphereReader:
-    def __init__(self, above_maximum, maximum, minimum, under_minimum):
+    def __init__(self, above_maximum, maximum, minimum, under_minimum, rc3_enabled=False):
         self._in_hip = open(os.path.join(_DATA_DIR, "hip_main.dat"), encoding="ascii")
         self._in_tyc = open(os.path.join(_DATA_DIR, "tyc_main.dat"), encoding="ascii")
         self._in_rc3 = open(os.path.join(_DATA_DIR, "rc3.dat"), encoding="ascii")
@@ -71,9 +72,9 @@ class SphereReader:
         self._maximum = maximum
         self._minimum = minimum
         self._under_minimum = under_minimum
+        self._rc3_enabled = rc3_enabled
         self._random = random.Random(0)
         self._galaxy_count = 0
-        self._galaxy_scale = 0.0
         self._galaxy_vectors = [None, None, None]
         self._excluding_stars = set()
 
@@ -224,7 +225,8 @@ class SphereReader:
 
             if self._galaxy_count != 0:
                 self._galaxy_count -= 1
-                r = math.exp(self._random.gauss(0.0, 1.0)) / self._galaxy_scale
+                # ベクトルの長さが尺度h。面積要素Rを含めた指数円盤の半径分布。
+                r = self._random.gammavariate(2.0, 1.0)
                 theta = self._random.random() * math.pi * 2
                 vector = (self._galaxy_vectors[2]
                           .plus(self._galaxy_vectors[0].mult_scalar(r * math.cos(theta)))
@@ -233,19 +235,25 @@ class SphereReader:
                 s.p = SpherePosition.from_vector(vector)
                 return s
 
-            line = _readline(self._in_rc3) if self._under_minimum else None
+            line = _readline(self._in_rc3) if self._rc3_enabled else None
             if line is not None:
-                # BT (total B magnitude)
+                # BT（BT_code が大文字 V の場合は全V等級）
                 value = line[189:194]
                 if value == "     ":
                     continue
                 btmag = float(value)
 
-                # (B-V)T (total (B-V))
-                value = line[252:256]
-                if value == "    ":
-                    continue
-                vtmag = btmag - float(value)
+                if line[194:195] == "V":
+                    vtmag = btmag
+                    value = line[252:256].strip()
+                    btmag = vtmag + float(value) if value else None
+                else:
+                    # (B-V)T (total (B-V))
+                    # 小文字 v は核の変光を示すため、通常どおりBからVへ変換する。
+                    value = line[252:256]
+                    if value == "    ":
+                        continue
+                    vtmag = btmag - float(value)
 
                 # Right Ascension B2000 (hours)
                 value = line[0:2]
@@ -288,16 +296,21 @@ class SphereReader:
                     dedeg *= -1
 
                 # Log D25
-                value = line[151:155]
+                value = line[151:155].strip()
+                # 0.1分角の直径 -> 秒角の半径。
+                a25 = 3.0 * 10 ** float(value) if value else None
+
+                # Log Ae: 総B光量の半分を含む円形開口の直径、RC3 bytes 177-180。
+                value = line[176:180].strip()
+                half_light_radius = 3.0 * 10 ** float(value) if value else None
+
+                # Log R25 (major/minor isophotal diameter ratio), RC3 bytes 162-165
+                value = line[161:165]
                 if value == "    ":
                     continue
-                d25 = 10 ** float(value)
-
-                # Mean error on log D25
-                value = line[157:160]
-                if value == "   ":
-                    continue
                 r25 = 10 ** float(value)
+                if not math.isfinite(r25) or r25 < 1.0:
+                    continue
 
                 # Position angle of the major axis
                 value = line[185:188]
@@ -309,14 +322,9 @@ class SphereReader:
                 if galaxy_count <= 0:
                     continue
 
-                scale_argument = (0.5 * math.pi * math.sqrt(2. * math.pi) * d25 * d25 / r25
-                                  * math.pow(2.512, -25 + vtmag) * 36. * 0.25)
-                # この分布モデルでは scale_argument が (0, 1] の範囲にある必要がある。
-                # RC3 にはこの条件を満たさないレコードがあり、Python では負数の平方根が
-                # ValueError になるため、生成不能な銀河を読み飛ばす。
-                if not 0. < scale_argument <= 1.:
+                scale_arcsec = exponential_scale_arcsec(a25, r25, btmag, half_light_radius)
+                if scale_arcsec is None:
                     continue
-                self._galaxy_scale = math.exp(math.sqrt(-2. * math.log(scale_argument)))
                 gv = self._galaxy_vectors
                 gv[2] = MathVector.from_mag_lng_lat(1., math.radians(radeg), math.radians(dedeg))
                 gv[0] = MathVector(0, 0, 1.)
@@ -324,8 +332,8 @@ class SphereReader:
                 gv[0] = gv[1].cross(gv[2])
                 gv[0] = gv[0].mult_scalar(math.cos(math.radians(pa))).plus(gv[1].mult_scalar(math.sin(-math.radians(pa))))
                 gv[1] = gv[2].cross(gv[0])
-                gv[0] = gv[0].mult_scalar(math.radians(d25 / 600 / 2))
-                gv[1] = gv[1].mult_scalar(math.radians(d25 / 600 / 2 / r25))
+                gv[0] = gv[0].mult_scalar(math.radians(scale_arcsec / 3600.0))
+                gv[1] = gv[1].mult_scalar(math.radians(scale_arcsec / 3600.0 / r25))
                 self._galaxy_count = galaxy_count
                 continue
 

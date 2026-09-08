@@ -1,0 +1,8 @@
+{
+  "name": "region-0.csv.gz",
+  "query": "SELECT FLOOR(l / 0.1) AS lon_bin, FLOOR((b + 90.0) / 0.1) AS lat_bin, COUNT(*) AS source_count,\nSUM(POWER(10.0, -0.4 * (phot_g_mean_mag - 7.5))) AS relative_flux\nFROM gaiadr3.gaia_source\nWHERE l >= 0 AND l < 60\nAND b >= -20 AND b <= 20\nAND phot_g_mean_mag > 7.5 AND phot_g_mean_mag <= 17\nGROUP BY lon_bin, lat_bin",
+  "job": "https://gea.esac.esa.int/tap-server/tap/async/ced25187-aa8c-11f1-b67b-bc97e148b76b-O",
+  "rows": 239988,
+  "stars": 32718768,
+  "sha256": "6382ad83c83e176071995c52f63d4d0885c43a3e94ebc704eceb07b9a2d177a0"
+}

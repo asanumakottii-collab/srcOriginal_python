@@ -346,21 +346,25 @@ def _init_sphere_reader(props):
         minimum = BasicTransformer.parse_double_with_default(input(), 7.5)
         print("最微星より暗い星を、最微星で疑似的に表現しますか。(y/N) ")
         under_minimum = input().lower() == "y"
+        print("RC3カタログの系外銀河を、最微等級の点の集合で表現しますか。(y/N) ")
+        rc3_enabled = BasicTransformer.parse_boolean_with_default(input(), False)
     else:  # non-interactive mode
         above_maximum = BasicTransformer.parse_boolean_with_default(props.get("star.above-maximum", ""), True)
         maximum = BasicTransformer.parse_double_with_default(props.get("star.maximum"), 1.5)
         minimum = BasicTransformer.parse_double_with_default(props.get("star.minimum"), 7.5)
         under_minimum = BasicTransformer.parse_boolean_with_default(props.get("star.under-minimum"), False)
+        rc3_enabled = BasicTransformer.parse_boolean_with_default(props.get("rc3.enabled"), False)
         excluding_stars = props.get("star.excluding", "").strip()
-        print("\t最輝星より明るい星を、最輝星で疑似的に表現" + ("します。" if under_minimum else "しません。"))
+        print("\t最輝星より明るい星を、最輝星で疑似的に表現" + ("します。" if above_maximum else "しません。"))
         print(f"\t最輝星は {maximum} 等星です。")
         print(f"\t最微星は {minimum} 等星です。")
         print("\t最微星より暗い星を、最微星で疑似的に表現" + ("します。" if under_minimum else "しません。"))
+        print("\tRC3カタログの系外銀河を、最微等級の点の集合で表現" + ("します。" if rc3_enabled else "しません。"))
         if excluding_stars == "":
             print("\t除外する星はありません。")
         else:
             print(f"\t除外する星は {excluding_stars} です。")
-    reader = SphereReader(above_maximum, maximum, minimum, under_minimum)
+    reader = SphereReader(above_maximum, maximum, minimum, under_minimum, rc3_enabled=rc3_enabled)
     if excluding_stars is not None:
         for hip_num in excluding_stars.split(" "):
             if hip_num != "":

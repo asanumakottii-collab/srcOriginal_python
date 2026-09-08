@@ -20,6 +20,7 @@ from transformer import (
     _init_enlarge_constellation_names,
     _init_enlarge_rate,
     _init_plate_writer,
+    _init_sphere_reader,
     _select_interactive_output_types,
     _parse_constellation_names,
     _write_assignment_polygons,
@@ -231,7 +232,7 @@ class ConstellationStarTests(unittest.TestCase):
 
 class SphereReaderTests(unittest.TestCase):
     @staticmethod
-    def _rc3_record(btmag, bv, log_d25):
+    def _rc3_record(btmag, bv, log_d25, bt_code=" ", log_ae=None):
         record = [" "] * 256
         record[0:2] = "12"
         record[2:4] = "00"
@@ -240,12 +241,39 @@ class SphereReaderTests(unittest.TestCase):
         record[10:12] = "20"
         record[12:14] = "00"
         record[14:16] = "00"
-        record[151:155] = f"{log_d25:4.2f}"
+        if log_d25 is not None:
+            record[151:155] = f"{log_d25:4.2f}"
         record[157:160] = ".00"
+        record[161:165] = "0.00"
+        if log_ae is not None:
+            record[176:180] = f"{log_ae:4.2f}"
         record[185:188] = "  0"
         record[189:194] = f"{btmag:5.2f}"
-        record[252:256] = f"{bv:4.2f}"
+        record[194] = bt_code
+        if bv is not None:
+            record[252:256] = f"{bv:4.2f}"
         return "".join(record) + "\n"
+
+    def test_rc3_axis_ratio_uses_log_r25_not_diameter_error(self):
+        for diameter_error, log_r25 in ((".00", "0.60"), (".12", "0.60"),
+                                         ("   ", "0.60"), (".12", "    ")):
+            with self.subTest(diameter_error=diameter_error, log_r25=log_r25):
+                record = list(self._rc3_record(9.0, 1.0, 1.0))
+                record[157:160] = diameter_error
+                record[161:165] = log_r25
+                streams = [StringIO(), StringIO(), StringIO("".join(record)), StringIO()]
+                with patch("builtins.open", side_effect=streams):
+                    reader = SphereReader(False, 1.5, 10.0, False, rc3_enabled=True)
+                try:
+                    star = reader.read_star()
+                    if not log_r25.strip():
+                        self.assertIsNone(star)
+                        continue
+                    self.assertIsNotNone(star)
+                    major, minor = reader._galaxy_vectors[:2]
+                    self.assertAlmostEqual(10 ** 0.60, major.get_mag() / minor.get_mag())
+                finally:
+                    reader.close()
 
     def test_catalog_magnitude_is_preserved_within_limits(self):
         tycho_record = [" "] * 216
@@ -265,7 +293,7 @@ class SphereReaderTests(unittest.TestCase):
 
         self.assertEqual(4.5, star.vmag)
 
-    def test_invalid_galaxy_scale_is_skipped(self):
+    def test_inconsistent_isophote_uses_fallback_and_continues(self):
         invalid_record = self._rc3_record(10.0, 0.5, 3.0)
         valid_record = self._rc3_record(10.0, 0.5, 1.0)
         streams = [
@@ -276,12 +304,186 @@ class SphereReaderTests(unittest.TestCase):
         ]
 
         with patch("builtins.open", side_effect=streams):
-            reader = SphereReader(False, 7.5, 10.0, True)
+            reader = SphereReader(False, 7.5, 10.0, True, rc3_enabled=True)
+        try:
             star = reader.read_star()
+            self.assertIsNotNone(star)
+            # D25=6000秒角なので、フォールバックのh=a25/3は1000秒角。
+            self.assertAlmostEqual(1000.0, math.degrees(
+                reader._galaxy_vectors[0].get_mag()) * 3600.0)
+            self.assertIsNotNone(reader.read_star())
+            self.assertIsNone(reader.read_star())
+        finally:
+            reader.close()
 
-        self.assertIsNotNone(star)
-        self.assertTrue(math.isfinite(star.p.radeg))
-        self.assertTrue(math.isfinite(star.p.dedeg))
+    def test_rc3_ae_is_a_circular_diameter_and_d25_is_optional(self):
+        for log_d25 in (None, 3.0):
+            with self.subTest(log_d25=log_d25):
+                streams = [StringIO(), StringIO(), StringIO(
+                    self._rc3_record(9.0, None, log_d25, "V", log_ae=1.0)), StringIO()]
+                with patch("builtins.open", side_effect=streams):
+                    reader = SphereReader(False, 1.5, 10.0, False, rc3_enabled=True)
+                try:
+                    self.assertIsNotNone(reader.read_star())
+                    h = math.degrees(reader._galaxy_vectors[0].get_mag()) * 3600.0
+                    # Ae=60秒角（直径）。円形銀河の半光量半径は30秒角。
+                    self.assertAlmostEqual(30.0 / 1.6783469900166605, h)
+                finally:
+                    reader.close()
+
+    def test_rc3_b_band_controls_shape_and_v_band_controls_star_count(self):
+        results = []
+        # 同じB=9で色だけ変更した場合と、同じ天体のV値を格納した場合。
+        for magnitude, color, flag in ((9.0, 1.0, " "), (9.0, 0.0, " "),
+                                       (8.0, 1.0, "V"), (8.0, None, "V")):
+            streams = [StringIO(), StringIO(), StringIO(
+                self._rc3_record(magnitude, color, 1.0, flag)), StringIO()]
+            with patch("builtins.open", side_effect=streams):
+                reader = SphereReader(False, 1.5, 10.0, False, rc3_enabled=True)
+            try:
+                stars = list(iter(reader.read_star, None))
+                results.append((len(stars), reader._galaxy_vectors[0].get_mag()))
+            finally:
+                reader.close()
+        self.assertEqual([6, 2, 6, 6], [count for count, _ in results])
+        self.assertAlmostEqual(results[0][1], results[1][1])
+        self.assertAlmostEqual(results[0][1], results[2][1])
+        self.assertAlmostEqual(math.radians(10.0 / 3600.0), results[3][1])
+
+    def test_generated_positions_follow_exponential_surface_brightness(self):
+        record = list(self._rc3_record(0.0, 0.0, 1.0, log_ae=0.0))
+        record[161:165] = "0.60"
+        streams = [StringIO(), StringIO(), StringIO("".join(record)), StringIO()]
+        with patch("builtins.open", side_effect=streams):
+            reader = SphereReader(False, 1.5, 10.0, False, rc3_enabled=True)
+        try:
+            stars = list(iter(reader.read_star, None))
+            major, minor, center = reader._galaxy_vectors
+            major_unit, minor_unit = major.unit_vector(), minor.unit_vector()
+            radii = []
+            inside_circle = 0
+            for star in stars:
+                direction = MathVector.from_mag_lng_lat(
+                    1.0, math.radians(star.p.radeg), math.radians(star.p.dedeg))
+                # 接平面へ戻して、天球への変換を含めた実際の点の分布を調べる。
+                cosine = direction.x * center.x + direction.y * center.y + direction.z * center.z
+                offset = direction.mult_scalar(1.0 / cosine).minus(center)
+                x = offset.x * major_unit.x + offset.y * major_unit.y + offset.z * major_unit.z
+                y = offset.x * minor_unit.x + offset.y * minor_unit.y + offset.z * minor_unit.z
+                radii.append(math.hypot(x / major.get_mag(), y / minor.get_mag()))
+                inside_circle += offset.get_mag() <= math.radians(3.0 / 3600.0)
+            # Gamma(2, 1): 平均半径2h、2h内の光量1-3exp(-2)。
+            self.assertAlmostEqual(2.0, sum(radii) / len(radii), delta=0.05)
+            self.assertAlmostEqual(1.0 - 3.0 * math.exp(-2.0),
+                                   sum(r < 2.0 for r in radii) / len(radii), delta=0.02)
+            self.assertAlmostEqual(0.5, inside_circle / len(radii), delta=0.02)
+        finally:
+            reader.close()
+
+    def test_rc3_magnitude_flag_controls_color_conversion(self):
+        # 最微等級10に対し、V=9なら2点、B=9・B-V=1ならV=8で6点。
+        cases = [
+            ("V", 1.0, 2),
+            ("V", None, 2),
+            (" ", 1.0, 6),
+            ("M", 1.0, 6),
+            ("S", 1.0, 6),
+            ("v", 1.0, 6),
+            (" ", None, 0),
+        ]
+        for bt_code, bv, expected_count in cases:
+            with self.subTest(bt_code=bt_code, bv=bv):
+                streams = [
+                    StringIO(), StringIO(),
+                    StringIO(self._rc3_record(9.0, bv, 1.0, bt_code)),
+                    StringIO(),
+                ]
+                with patch("builtins.open", side_effect=streams):
+                    reader = SphereReader(False, 1.5, 10.0, False, rc3_enabled=True)
+                try:
+                    stars = list(iter(reader.read_star, None))
+                    self.assertEqual(expected_count, len(stars))
+                    self.assertTrue(all(star.vmag == 10.0 for star in stars))
+                finally:
+                    reader.close()
+
+    def test_faint_stars_and_rc3_can_be_enabled_independently(self):
+        tycho_record = [" "] * 216
+        tycho_record[41:46] = f"{8.5:5.2f}"
+        tycho_record[51:63] = f"{12.0:12.6f}"
+        tycho_record[64:76] = f"{34.0:12.6f}"
+        hip_record = tycho_record.copy()
+        hip_record[8:14] = "     1"
+        for under_minimum in (False, True):
+            for rc3_enabled in (False, True):
+                with self.subTest(under_minimum=under_minimum, rc3_enabled=rc3_enabled):
+                    streams = [
+                        StringIO("".join(hip_record) + "\n"),
+                        StringIO("".join(tycho_record) + "\n"),
+                        StringIO(self._rc3_record(7.5, 0.5, 1.0)),
+                        StringIO(),
+                    ]
+                    with patch("builtins.open", side_effect=streams):
+                        reader = SphereReader(
+                            False, 1.5, 7.5, under_minimum, rc3_enabled=rc3_enabled
+                        )
+                    try:
+                        # 8.5等の恒星が確実に採用される乱数で分岐を確認する。
+                        with patch.object(reader._random, "random", return_value=0.1):
+                            stars = list(iter(reader.read_star, None))
+                        self.assertEqual(2 * int(under_minimum) + int(rc3_enabled), len(stars))
+                        self.assertTrue(all(star.vmag == 7.5 for star in stars))
+                        self.assertEqual(
+                            2 * int(under_minimum),
+                            sum(star.p.radeg == 12.0 for star in stars),
+                        )
+                    finally:
+                        reader.close()
+
+
+class SphereReaderSettingsTests(unittest.TestCase):
+    def test_config_switches_and_logs_are_independent(self):
+        for under_minimum in (False, True):
+            for rc3_enabled in (False, True):
+                with self.subTest(under_minimum=under_minimum, rc3_enabled=rc3_enabled):
+                    props = {
+                        "star.above-maximum": "no",
+                        "star.under-minimum": "yes" if under_minimum else "no",
+                        "rc3.enabled": "yes" if rc3_enabled else "no",
+                    }
+                    output = StringIO()
+                    with patch("transformer.SphereReader") as reader, patch("sys.stdout", output):
+                        _init_sphere_reader(props)
+                    reader.assert_called_once_with(
+                        False, 1.5, 7.5, under_minimum, rc3_enabled=rc3_enabled
+                    )
+                    self.assertIn("最輝星より明るい星を、最輝星で疑似的に表現しません。", output.getvalue())
+                    self.assertIn(
+                        "最微星より暗い星を、最微星で疑似的に表現"
+                        + ("します。" if under_minimum else "しません。"), output.getvalue()
+                    )
+                    self.assertIn(
+                        "RC3カタログの系外銀河を、最微等級の点の集合で表現"
+                        + ("します。" if rc3_enabled else "しません。"), output.getvalue()
+                    )
+
+    def test_omitted_rc3_setting_is_disabled_even_with_faint_stars_enabled(self):
+        with patch("transformer.SphereReader") as reader, patch("sys.stdout", StringIO()):
+            _init_sphere_reader({"star.under-minimum": "yes"})
+        reader.assert_called_once_with(True, 1.5, 7.5, True, rc3_enabled=False)
+
+    def test_interactive_switches_are_independent(self):
+        for under_minimum in (False, True):
+            for rc3_enabled in (False, True):
+                with self.subTest(under_minimum=under_minimum, rc3_enabled=rc3_enabled):
+                    answers = ["n", "", "", "y" if under_minimum else "n", "y" if rc3_enabled else ""]
+                    with patch("builtins.input", side_effect=answers), \
+                            patch("transformer.SphereReader") as reader, \
+                            patch("sys.stdout", StringIO()):
+                        _init_sphere_reader(None)
+                    reader.assert_called_once_with(
+                        False, 1.5, 7.5, under_minimum, rc3_enabled=rc3_enabled
+                    )
 
 
 class AssignmentPolygonTests(unittest.TestCase):
