@@ -181,6 +181,33 @@ class GalaxyTransformerTests(unittest.TestCase):
 
 
 class GalaxyOutputTests(unittest.TestCase):
+    def test_configured_frame_size_in_svg_and_pdf(self):
+        for writer_type in (PlateWriterType.SVG, PlateWriterType.PDF):
+            if writer_type == PlateWriterType.PDF and not importlib.util.find_spec("reportlab"):
+                continue
+            for configured, expected in ((None, 69.25), ("0", 69.25), ("100", 50.)):
+                with self.subTest(writer_type=writer_type, configured=configured):
+                    with tempfile.TemporaryDirectory() as directory, patch("sys.stdout", new_callable=StringIO):
+                        props = {"output.directory": directory, "scale": "2"}
+                        if configured is not None:
+                            props["plate.frame-size"] = configured
+                        writer = _init_plate_writer(props, writer_type)
+                        self.assertEqual(expected, writer.r)
+                        self.assertTrue(writer._is_position_in_frame(expected, expected))
+                        self.assertFalse(writer._is_position_in_frame(expected + .01, 0.))
+                        writer.close()
+                        if writer_type == PlateWriterType.SVG:
+                            for page in Path(directory, "galaxy").glob("*.svg"):
+                                for rect in ET.parse(page).getroot().findall("{http://www.w3.org/2000/svg}rect"):
+                                    self.assertEqual(f"{expected * 2}mm", rect.get("width"))
+                                    self.assertEqual(f"{expected * 2}mm", rect.get("height"))
+
+    def test_invalid_frame_size_is_rejected(self):
+        for value in ("-1", "nan", "inf"):
+            with self.subTest(value=value), patch("sys.stdout", new_callable=StringIO):
+                with self.assertRaisesRegex(ValueError, "plate.frame-size"):
+                    _init_plate_writer({"plate.frame-size": value}, PlateWriterType.SVG)
+
     def test_svg_creates_all_four_frames_without_stars(self):
         with tempfile.TemporaryDirectory() as directory, patch("sys.stdout", new_callable=StringIO):
             writer = _init_plate_writer({"output.directory": directory}, PlateWriterType.SVG)

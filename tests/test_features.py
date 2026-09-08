@@ -431,6 +431,39 @@ class PlateFrameBoundaryTests(unittest.TestCase):
 
 @unittest.skipUnless(_HAS_REPORTLAB, "ReportLab is required for PDF writer tests")
 class PDFWriterTests(unittest.TestCase):
+    def test_pdf_replaces_existing_file_without_opening_it_for_writing(self):
+        import builtins
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory, "print-0.pdf")
+            output.write_bytes(b"existing PDF")
+            original_open = builtins.open
+
+            def guarded_open(file, mode="r", *args, **kwargs):
+                if str(file) == str(output) and "w" in mode:
+                    raise TimeoutError(60, "Operation timed out")
+                return original_open(file, mode, *args, **kwargs)
+
+            writer = PlateWriterPDF(1, 1, 37.5, True, "print-", False, directory)
+            writer.write_star(_plate_star())
+            with patch("builtins.open", side_effect=guarded_open):
+                writer.close()
+            self.assertTrue(output.read_bytes().startswith(b"%PDF-"))
+            self.assertEqual([output], list(Path(directory).iterdir()))
+
+    def test_failed_pdf_replace_preserves_existing_file_and_cleans_temp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory, "print-0.pdf")
+            output.write_bytes(b"existing PDF")
+            writer = PlateWriterPDF(1, 1, 37.5, True, "print-", False, directory)
+            writer.write_star(_plate_star())
+            with patch("plate_writer.os.replace", side_effect=TimeoutError(60, "Operation timed out")):
+                with self.assertRaises(OSError) as error:
+                    writer.close()
+            self.assertEqual(str(output), error.exception.filename)
+            self.assertEqual(b"existing PDF", output.read_bytes())
+            self.assertEqual([output], list(Path(directory).iterdir()))
+            self.assertIsNone(writer.outs)
+
     def test_pdf_writer_replaces_postscript_writer(self):
         self.assertEqual({"SVG", "PDF"}, {writer_type.name for writer_type in PlateWriterType})
 

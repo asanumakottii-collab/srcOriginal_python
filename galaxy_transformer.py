@@ -262,19 +262,25 @@ def _init_plate_writer(props, writer_type, write_frames=True):
         column = BasicTransformer.parse_int_with_default(input(), 1)
         print("縦に各段の原盤をいくつ配置しますか。(default=1) ")
         row = BasicTransformer.parse_int_with_default(input(), 1)
+        print("正方形原盤の一辺は何mmですか。(default=0: 用紙サイズから自動計算) ")
+        frame_size = BasicTransformer.parse_double_with_default(input(), 0.)
     else:  # non-interactive mode
         column = BasicTransformer.parse_int_with_default(props.get("plate.column"), 1)
         row = BasicTransformer.parse_int_with_default(props.get("plate.row"), 1)
+        frame_size = BasicTransformer.parse_double_with_default(props.get("plate.frame-size"), 0.)
         filename_prefix = props.get("galaxy.file.prefix", filename_prefix)
         invert_color = BasicTransformer.parse_boolean_with_default(props.get("color.invert", ""), False)
         print(f"\t横に各段の原盤を {column} 個配置します。")
         print(f"\t縦に各段の原盤を {row} 個配置します。")
         print(f"\t出力フォルダは {output_dir} です。")
         print("\t原板を" + ("黒色" if invert_color else "白色") + "、星を" + ("白色" if invert_color else "黒色") + "で書き出します。")
+    if not math.isfinite(frame_size) or frame_size < 0:
+        raise ValueError("plate.frame-size: 有限の0以上の値を指定してください。")
+    print(f"\t正方形原盤の一辺は {frame_size} mm です（0は自動計算）。")
     if writer_type == PlateWriterType.SVG:
-        writer = PlateWriterSVG(column, row, 0., False, filename_prefix, invert_color, output_dir)
+        writer = PlateWriterSVG(column, row, frame_size / 2, False, filename_prefix, invert_color, output_dir)
     elif writer_type == PlateWriterType.PDF:
-        writer = PlateWriterPDF(column, row, 0., False, filename_prefix, invert_color, output_dir)
+        writer = PlateWriterPDF(column, row, frame_size / 2, False, filename_prefix, invert_color, output_dir)
     else:
         return None
     if write_frames:
