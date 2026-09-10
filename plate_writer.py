@@ -22,6 +22,7 @@
 
 import math
 import os
+import tempfile
 from abc import ABC, abstractmethod
 from enum import Enum
 
@@ -107,6 +108,13 @@ class _PlateWriterBase(PlateWriter):
 
     def _output_path(self, extension):
         return resolve_output_path(self.output_dir, f"{self.filename_prefix}{self.number_of_page}.{extension}")
+
+    def write_frames(self, number_of_units):
+        """上下それぞれに指定個数の原盤枠を、星がない場合も出力します。"""
+        if self.outs is None:
+            raise IOError("writer is closed")
+        if number_of_units > 0:
+            self._write_frame(number_of_units - 1)
 
     def _is_position_in_frame(self, x, y):
         """原盤上の中心座標が、実際に描画する枠の内側かを返します。"""
@@ -277,10 +285,30 @@ class PlateWriterPDF(_PlateWriterBase):
     def close(self):
         if self.outs is None:
             raise IOError("writer is closed")
-        for out in self.outs:
-            out.showPage()
-            out.save()
+        outs = self.outs
+        # 保存失敗後にデストラクタが同じCanvasを再保存しない。
         self.outs = None
+        for index, out in enumerate(outs):
+            destination = resolve_output_path(
+                self.output_dir, f"{self.filename_prefix}{index}.pdf")
+            temporary = None
+            try:
+                # 既存ファイルへの直接書き込みは同期ストレージ等でタイムアウト
+                # することがある。同じディレクトリに完成させてから原子的に置換。
+                with tempfile.NamedTemporaryFile(
+                        mode="wb", dir=os.path.dirname(os.path.abspath(destination)),
+                        prefix=".otl-pdf-", suffix=".tmp", delete=False) as stream:
+                    temporary = stream.name
+                    out.showPage()
+                    stream.write(out.getpdfdata())
+                os.replace(temporary, destination)
+            except OSError as exc:
+                raise OSError(
+                    exc.errno, f"PDFの保存に失敗しました: {exc.strerror}", destination
+                ) from exc
+            finally:
+                if temporary is not None and os.path.exists(temporary):
+                    os.unlink(temporary)
 
 
 class PlateWriterSVG(_PlateWriterBase):

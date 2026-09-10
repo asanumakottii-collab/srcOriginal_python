@@ -1,13 +1,13 @@
 # Orb Transform Library (OTL) — Ver. 1.5
 
-OTL は、星表データをもとにプラネタリウム投影機用の原板（星の穴を開けるための版下）を生成するPython製のツールです。東京大学地文研究会天文部が2007年にJavaで開発した OTL をもとに、Pythonに移植し機能の追加や使いやすさの改善を進めています。
+OTL は、星表データをもとにプラネタリウム投影機用の恒星原板（星の穴を開けるための版下）を生成するPython製のツールです。東京大学地文研究会天文部が2007年にJavaで開発した OTL をもとに、Pythonに移植し機能の追加や使いやすさの改善を進めています。
 
 ## これは何をするものか
 
 自作の投影機式プラネタリウム(正十二面体などにレンズユニットを複数配置して天球全体を投影するタイプ)を作るとき、各投影機ユニットに取り付ける「原板」に星の穴をどこに開けるかを計算し、SVG または印刷用 PDF として出力します。
 
 1. `SphereReader` が Hipparcos/Tycho の星表、RC3 銀河カタログ、IAU88 星座線カタログを読み込み、天球上の星・星座を取得
-2. `Transformer`(または銀河専用の `GalaxyTransformer`)が、指定したドーム半径・投影機配置・レンズ焦点距離などの幾何パラメータに基づいて、天球上の位置を各ユニットの原板上の位置(mm単位のXY座標)に変換
+2. `Transformer` が、指定したドーム半径・投影機配置・レンズ焦点距離などの幾何パラメータに基づいて、天球上の位置を各ユニットの原板上の位置(mm単位のXY座標)に変換
 3. `PlateWriterSVG` / `PlateWriterPDF` が変換結果を版下データとして書き出す
 
 次の機能にも対応しています。
@@ -15,13 +15,14 @@ OTL は、星表データをもとにプラネタリウム投影機用の原板�
 - 星座線を構成する恒星だけを、指定した倍率で拡大
 - 各原盤が担当する天球領域をポリゴンSVG / PDFとして自動生成
 
+天の川原盤（OHPフィルム・Gaia DR3エッチング）は [Via Lactea Generator](../../ぎんとう/Via%20Lactea%20Generator/README.md) に移管しました。OTLでは恒星原盤・星座・担当星域を扱います。
+
 ## 構成
 
 | ファイル | 役割 |
 |---|---|
 | `transformer.py` | 星・星座用の原板を生成するメインスクリプト(エントリポイント) |
-| `galaxy_transformer.py` | 天の川(銀河)専用の原板を生成するスクリプト(エントリポイント) |
-| `basic_transformer.py` | 上記2つの変換処理に共通する抽象基底クラス |
+| `basic_transformer.py` | 恒星・星座の変換処理の抽象基底クラス |
 | `sphere_reader.py` | `hip_main.dat` / `tyc_main.dat` / `rc3.dat` / `IAU88.hlc` を読み込むリーダー |
 | `galaxy_profile.py` | RC3銀河の指数関数の表面輝度モデルの尺度を計算 |
 | `unit_arrangement.py` | 正十二面体をもとにした投影機ユニットの配置計算 |
@@ -32,7 +33,6 @@ OTL は、星表データをもとにプラネタリウム投影機用の原板�
 | `plate_polygon.py` | 原盤ごとの担当星域ポリゴン計算 |
 | `config.py` | Java プロパティ形式(`.properties`)の設定ファイル読み込み |
 | `starconfig.properties` | `transformer.py` 用の設定サンプル |
-| `galaxyconfig.properties` | `galaxy_transformer.py` 用の設定サンプル |
 
 ## 必要なデータファイル
 
@@ -40,7 +40,7 @@ OTL は、星表データをもとにプラネタリウム投影機用の原板�
 
 - `hip_main.dat` — Hipparcos 星表
 - `tyc_main.dat` — Tycho 星表
-- `rc3.dat` — RC3 銀河カタログ(系外銀河を点の集合で描画するために使用)
+- `rc3.dat` — RC3 銀河カタログ(系外銀河の光を疑似星群として描画)
 - `IAU88.hlc` — IAU88 星座線カタログ
 
 ## セットアップ
@@ -76,9 +76,6 @@ python3 transformer.py -PDF -f starconfig.properties
 
 # 設定にかかわらず担当星域ポリゴンも生成する場合
 python3 transformer.py --polygons -f starconfig.properties
-
-# 天の川専用原板の生成
-python3 galaxy_transformer.py -f galaxyconfig.properties
 ```
 
 `transformer.py` の対話モードでは、`star_SVG`、`star_pdf`、`polygon_SVG`、`polygon_pdf` をそれぞれ出力するか選択できます。複数の形式を同時に選択することもできます。未入力時は従来どおり `star_SVG` のみを出力します。
@@ -90,8 +87,6 @@ python3 galaxy_transformer.py -f galaxyconfig.properties
 - `--polygons` — 各原盤の担当星域ポリゴンを原板データと同じ形式で別ファイルに出力する
 - `-h`, `-help` — 使い方を表示
 
-設定ファイルの各項目(ドーム半径、投影機とレンズの距離、正十二面体上のユニット配置箇所、星の等級の上限・下限など)は `starconfig.properties` / `galaxyconfig.properties` にコメント付きで記載しています。
-
 設定ファイルの `output.directory` は出力ルートフォルダです。未指定時は `output` が使われ、生成物は種類ごとに次のサブフォルダへ出力されます。
 
 ```text
@@ -100,9 +95,10 @@ output/
 ├── star_pdf/      # 恒星原盤の PDF
 ├── polygon_SVG/   # 担当星域ポリゴンの SVG
 ├── polygon_pdf/   # 担当星域ポリゴンの PDF
-├── galaxy/        # 天の川専用原盤
 └── unit_position/ # ユニット配置画像
 ```
+
+設定項目は `starconfig.properties` にコメント付きで記載しています。
 
 印刷用 PDF と SVG の用紙サイズは ISO A4（幅 210 mm × 高さ 297 mm）です。印刷時は「用紙に合わせる」を無効にし、100%(実寸)で出力してください。旧 `-PS` オプションは廃止され、使用するとエラーになります。
 

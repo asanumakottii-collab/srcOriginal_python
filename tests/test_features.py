@@ -9,7 +9,6 @@ from unittest.mock import MagicMock, patch
 
 from basic_transformer import BasicTransformer
 from mathvector import MathVector
-from galaxy_transformer import _init_plate_writer as _init_galaxy_plate_writer
 from models import PlateConstellation, PlatePosition, PlateStar, SpherePosition, SphereStar
 from plate_polygon import PlateAssignmentPolygonGenerator
 from plate_writer import PlateWriterPDF, PlateWriterSVG, PlateWriterType, categorized_output_dir
@@ -633,6 +632,39 @@ class PlateFrameBoundaryTests(unittest.TestCase):
 
 @unittest.skipUnless(_HAS_REPORTLAB, "ReportLab is required for PDF writer tests")
 class PDFWriterTests(unittest.TestCase):
+    def test_pdf_replaces_existing_file_without_opening_it_for_writing(self):
+        import builtins
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory, "print-0.pdf")
+            output.write_bytes(b"existing PDF")
+            original_open = builtins.open
+
+            def guarded_open(file, mode="r", *args, **kwargs):
+                if str(file) == str(output) and "w" in mode:
+                    raise TimeoutError(60, "Operation timed out")
+                return original_open(file, mode, *args, **kwargs)
+
+            writer = PlateWriterPDF(1, 1, 37.5, True, "print-", False, directory)
+            writer.write_star(_plate_star())
+            with patch("builtins.open", side_effect=guarded_open):
+                writer.close()
+            self.assertTrue(output.read_bytes().startswith(b"%PDF-"))
+            self.assertEqual([output], list(Path(directory).iterdir()))
+
+    def test_failed_pdf_replace_preserves_existing_file_and_cleans_temp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory, "print-0.pdf")
+            output.write_bytes(b"existing PDF")
+            writer = PlateWriterPDF(1, 1, 37.5, True, "print-", False, directory)
+            writer.write_star(_plate_star())
+            with patch("plate_writer.os.replace", side_effect=TimeoutError(60, "Operation timed out")):
+                with self.assertRaises(OSError) as error:
+                    writer.close()
+            self.assertEqual(str(output), error.exception.filename)
+            self.assertEqual(b"existing PDF", output.read_bytes())
+            self.assertEqual([output], list(Path(directory).iterdir()))
+            self.assertIsNone(writer.outs)
+
     def test_pdf_writer_replaces_postscript_writer(self):
         self.assertEqual({"SVG", "PDF"}, {writer_type.name for writer_type in PlateWriterType})
 
@@ -645,19 +677,15 @@ class PDFWriterTests(unittest.TestCase):
             self.assertTrue(output.read_bytes().startswith(b"%PDF-"))
             self.assertFalse(Path(directory, "print-0.ps").exists())
 
-    def test_pdf_factories_are_used_by_both_transformers(self):
+    def test_pdf_factory_is_used_by_star_transformer(self):
         with tempfile.TemporaryDirectory() as directory, patch("sys.stdout", new_callable=StringIO):
             props = {"output.directory": directory}
             star_writer = _init_plate_writer(props, PlateWriterType.PDF)
-            galaxy_writer = _init_galaxy_plate_writer(props, PlateWriterType.PDF)
             try:
                 self.assertIsInstance(star_writer, PlateWriterPDF)
-                self.assertIsInstance(galaxy_writer, PlateWriterPDF)
                 self.assertEqual(Path(directory, "star_pdf"), Path(star_writer.output_dir))
-                self.assertEqual(Path(directory, "galaxy"), Path(galaxy_writer.output_dir))
             finally:
                 star_writer.close()
-                galaxy_writer.close()
 
     @unittest.skipUnless(_HAS_PYPDF, "pypdf is required for PDF structure tests")
     def test_pdf_writer_draws_assignment_polygon(self):
@@ -841,15 +869,13 @@ class OutputFormatCLITests(unittest.TestCase):
                 writer.close()
             self.assertTrue(Path(directory, "star_SVG", "star-0.svg").is_file())
 
-    def test_deprecated_postscript_option_stops_both_commands(self):
-        from galaxy_transformer import main as galaxy_main
+    def test_deprecated_postscript_option_stops_star_command(self):
         from transformer import main as star_main
 
-        for main in (star_main, galaxy_main):
-            with (patch("sys.stdout", new_callable=StringIO),
-                  patch("sys.stderr", new_callable=StringIO) as stderr):
-                self.assertEqual(2, main(["-PS"]))
-                self.assertIn("-PDF", stderr.getvalue())
+        with (patch("sys.stdout", new_callable=StringIO),
+              patch("sys.stderr", new_callable=StringIO) as stderr):
+            self.assertEqual(2, star_main(["-PS"]))
+            self.assertIn("-PDF", stderr.getvalue())
 
     def test_pdf_mode_processes_constellations_in_star_command(self):
         from transformer import main as star_main
@@ -868,23 +894,5 @@ class OutputFormatCLITests(unittest.TestCase):
 
         self.assertIn("星座を処理しますか。(y/N)", stdout.getvalue())
         transformer.process_constellations.assert_called_once_with(reader, writer)
-
-    def test_pdf_mode_processes_constellations_in_galaxy_command(self):
-        from galaxy_transformer import main as galaxy_main
-
-        transformer = MagicMock()
-        reader = MagicMock()
-        writer = MagicMock()
-        with (patch("galaxy_transformer._init_galaxy_transformer", return_value=transformer),
-              patch("galaxy_transformer._init_sphere_reader", return_value=reader),
-              patch("galaxy_transformer._init_plate_writer", return_value=writer),
-              patch("builtins.input", return_value="y"),
-              patch("sys.stdout", new_callable=StringIO) as stdout):
-            galaxy_main(["-PDF"])
-
-        self.assertIn("星座を処理しますか。(y/N)", stdout.getvalue())
-        transformer.process_constellations.assert_called_once_with(reader, writer)
-
-
 if __name__ == "__main__":
     unittest.main()
